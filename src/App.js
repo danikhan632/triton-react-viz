@@ -1,25 +1,76 @@
-import logo from './logo.svg';
-import './App.css';
+// App.jsx
+import React from 'react';
+import { Box, Typography } from '@mui/material';
+import GridViewComponent from './components/GridViewComponent';
+import CodeViewerComponent from './components/CodeViewerComponent';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 
-function App() {
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+  },
+});
+
+const App = () => {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
+    <ThemeProvider theme={darkTheme}>
+      {/* Root Container */}
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100vh', // Full viewport height
+          bgcolor: 'grey.900',
+          color: 'white',
+        }}
+      >
+        {/* Header */}
+        <Box sx={{ bgcolor: 'grey.800', p: 2 }}>
+          <Typography variant="h4" align="center">
+            GPU Profiling Tool
+          </Typography>
+        </Box>
+
+        {/* Main Content */}
+        <Box
+          sx={{
+            display: 'flex',
+            flexGrow: 1, // Fill remaining space after header
+            minHeight: 0, // Critical for allowing children to shrink
+          }}
         >
-          Learn React
-        </a>
-      </header>
-    </div>
+          {/* Grid View - Left Side (40%) */}
+          <Box
+            sx={{
+              flex: '0 0 60%', // Increased to 40% width
+              p: 2,
+              overflow: 'auto',
+              height: '100%', // Ensure it fills parent height
+            }}
+          >
+            <GridViewComponent />
+          </Box>
+
+          {/* Code Viewer - Right Side */}
+          <Box
+            sx={{
+              flex: '0 0 40%', // Reduced to 60% width
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'flex-start',
+              bgcolor: 'grey.800',
+              height: '100%', // Fill parent height
+              overflow: 'auto', // Allow scrolling if necessary
+            }}
+          >
+
+              <CodeViewerComponent />
+  
+          </Box>
+        </Box>
+      </Box>
+    </ThemeProvider>
   );
-}
+};
 
 export default App;
