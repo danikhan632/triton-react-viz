@@ -1,61 +1,137 @@
-File: GridBlock.jsx
-import React, { useEffect, useState } from 'react';
+// App.jsx
+import React, { useState, useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
+import GridViewComponent from './components/GridViewComponent';
+import CodeViewerComponent from './components/CodeViewerComponent';
+import BlockView from './components/BlockView';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 
-const fetchAndLogBlockData = (gridX, gridY, gridZ) => {
-  console.log('Fetching data for block:', gridX, gridY, gridZ);
+const darkTheme = createTheme({
+  palette: {
+    mode: 'dark',
+  },
+});
 
-  return fetch('http://73.106.153.51:5002/process_blocks', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      x: gridX,
-      y: gridY,
-      z: gridZ
-    })
-  })
-  .then(response => {
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return response.json();
-  })
-  .then(data => {
-    console.log('Received data for block:', gridX, gridY, gridZ);
-    console.log(data);
-    return data;
-  })
-  .catch(error => {
-    console.error('Error fetching block data:', error);
-    throw error;
-  });
-};
+const App = () => {
+  const [currBlock, setCurrBlock] = useState(null); // Current selected block
+  const [currLine, setCurrLine] = useState(null);   // Current highlighted line
+  const [codeLines, setCodeLines] = useState([]);   // Source code lines
+  const [loadingCode, setLoadingCode] = useState(true);
+  const [errorCode, setErrorCode] = useState(null);
 
-const GridBlock = ({ data, onClick }) => {
-  const [processedData, setProcessedData] = useState(null);
-
+  // Fetch the source code when the app mounts
   useEffect(() => {
-    fetchAndLogBlockData(data.x, data.y, data.z)
-      .then(setProcessedData)
-      .catch(error => console.error('Failed to fetch block data:', error));
-  }, [data.x, data.y, data.z]);
+    const fetchCode = async () => {
+      try {
+        const response = await fetch('http://73.106.153.51:5002/get_src', {
+          method: 'GET',
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const text = await response.text();
+        setCodeLines(text.split('\n'));
+        setLoadingCode(false);
+      } catch (error) {
+        console.error('Error fetching source code:', error);
+        setErrorCode('Failed to load source code.');
+        setLoadingCode(false);
+      }
+    };
 
-  const handleClick = () => {
-    if (processedData && processedData.source_line) {
-      onClick({ ...data, processedData, lineToHighlight: processedData.source_line });
-    } else {
-      onClick({ ...data, processedData });
-    }
-  };
+    fetchCode();
+  }, []);
 
   return (
-    <Box 
-      onClick={handleClick}
-      sx={{ 
-        p: 1, 
-        cursor: 'pointer', 
+    <ThemeProvider theme={darkTheme}>
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100vh',
+          bgcolor: 'grey.900',
+          color: 'white',
+        }}
+      >
+        {/* Header */}
+        <Box sx={{ bgcolor: 'grey.800', p: 2 }}>
+          <Typography variant="h4" align="center">
+            GPU Profiling Tool
+          </Typography>
+        </Box>
+
+        {/* Main Content */}
+        <Box
+          sx={{
+            display: 'flex',
+            flexGrow: 1,
+            minHeight: 0,
+          }}
+        >
+          {/* Left Side: GridView or BlockView */}
+          <Box
+            sx={{
+              flex: '0 0 60%',
+              p: 2,
+              overflow: 'auto',
+              height: '100%',
+            }}
+          >
+            {currBlock === null ? (
+              <GridViewComponent setCurrBlock={setCurrBlock} />
+            ) : (
+              <BlockView
+                currBlock={currBlock}
+                setCurrBlock={setCurrBlock}
+                currLine={currLine}
+                codeLines={codeLines}
+              />
+            )}
+          </Box>
+
+          {/* Right Side: CodeViewer */}
+          <Box
+            sx={{
+              flex: '0 0 40%',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'flex-start',
+              bgcolor: 'grey.800',
+              height: '100%',
+              overflow: 'auto',
+            }}
+          >
+            <CodeViewerComponent
+              currBlock={currBlock}
+              currLine={currLine}
+              setCurrLine={setCurrLine}
+              codeLines={codeLines}
+              loadingCode={loadingCode}
+              errorCode={errorCode}
+            />
+          </Box>
+        </Box>
+      </Box>
+    </ThemeProvider>
+  );
+};
+
+export default App;
+
+
+
+File: GridBlock.jsx
+// GridBlock.jsx
+import React from 'react';
+import { Box, Typography } from '@mui/material';
+
+const GridBlock = ({ data, onClick }) => {
+  return (
+    <Box
+      onClick={() => onClick(data)} // Call onClick with block data
+      sx={{
+        p: 1,
+        cursor: 'pointer',
         '&:hover': { bgcolor: 'action.hover' },
         height: '100%',
         display: 'flex',
@@ -70,93 +146,216 @@ const GridBlock = ({ data, onClick }) => {
     >
       <Typography variant="caption">{`${data.x},${data.y},${data.z}`}</Typography>
       <Typography variant="body2">Operations: {data.operations.length}</Typography>
-      {processedData && <Typography variant="caption">Processed</Typography>}
     </Box>
   );
 };
 
 export default GridBlock;
 
-File: GridViewComponent.jsx
-// GridViewComponent.jsx
-import React, { useState, useEffect } from 'react';
-import { 
-  Box, 
-  Button, 
-  Slider, 
-  Typography, 
-  Grid,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions
-} from '@mui/material';
 
+File: BlockView.jsx
+import React, { useEffect, useState } from 'react';
+import { Box, Typography, Button, CircularProgress } from '@mui/material';
 
-
-const fetchAndLogBlockData = (gridX, gridY, gridZ) => {
+const fetchAndLogBlockData = async (gridX, gridY, gridZ) => {
   console.log('Fetching data for block:', gridX, gridY, gridZ);
 
-  return fetch('http://73.106.153.51:5002/process_blocks', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      x: gridX,
-      y: gridY,
-      z: gridZ
-    })
-  })
-  .then(response => {
+  try {
+    const response = await fetch('http://73.106.153.51:5002/process_blocks', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        x: gridX,
+        y: gridY,
+        z: gridZ,
+      }),
+    });
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    return response.json();
-  })
-  .then(data => {
-    // Assuming data.results is an array of objects and each object has 'changed_values'
-    data.results.forEach(entry => {
-      console.log('Entry:', entry);
-    });
 
-    console.log('Received data for block:', gridX, gridY, gridZ);
-    console.log(data);
+    const data = await response.json();
     return data;
-  })
-  .catch(error => {
+  } catch (error) {
     console.error('Error fetching block data:', error);
     throw error;
-  });
+  }
 };
 
-
-const GridViewComponent = ({ setCurrBlock }) => { // Accept setCurrBlock
-  const [globalData, setGlobalData] = useState(null);
-  const [currentView, setCurrentView] = useState('main');
-  const [maxValues, setMaxValues] = useState([0, 0, 0]);
-  const [currentBlockData, setCurrentBlockData] = useState(null);
-  const [sliderValues, setSliderValues] = useState([-1, -1, -1]);  // Default to -1 for no filtering
-  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
+const BlockView = ({ currBlock, setCurrBlock, currLine, codeLines }) => {
+  const [processedData, setProcessedData] = useState(null);
+  const [error, setError] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [variables, setVariables] = useState({});
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (!currBlock) {
+      setProcessedData(null);
+      setVariables({});
+      return;
+    }
 
-  const fetchData = async () => {
-    try {
-      const response = await fetch('http://73.106.153.51:5002/api/data');
-      const data = await response.json();
-      setGlobalData(data);
-      console.log(data.ops.visualization_data);
-      determineMaxValues(data.ops.visualization_data);
-    } catch (error) {
-      console.error('Error fetching data:', error);
+    const fetchData = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const data = await fetchAndLogBlockData(currBlock.x, currBlock.y, currBlock.z);
+        setProcessedData(data);
+        updateVariables(data);
+      } catch (err) {
+        setError('Failed to fetch block data.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [currBlock]);
+
+  useEffect(() => {
+    if (processedData) {
+      updateVariables(processedData);
+    }
+  }, [currLine, processedData]);
+
+  const updateVariables = (data) => {
+    if (data && data.results) {
+      const newVariables = {};
+      data.results.forEach(result => {
+        const resultLine = findLineNumber(result.source_line);
+        if (resultLine <= currLine) {
+          if (result.changed_vars) {
+            Object.entries(result.changed_vars).forEach(([key, value]) => {
+              newVariables[key] = typeof value === 'object' ? value.data : value;
+            });
+          }
+        }
+      });
+      setVariables(newVariables);
     }
   };
 
+  const handleBackClick = () => {
+    setCurrBlock(null);
+  };
+
+const findLineNumber = (sourceLine) => {
+  for (let i = 0; i < codeLines.length; i++) {
+    if (codeLines[i].trim() === sourceLine.trim()) {
+      return i + 1;
+    }
+  }
+  return -1;
+};
+  const currentResults =
+    processedData &&
+    processedData.results &&
+    processedData.results.filter((result) => {
+      const lineNum = findLineNumber(result.source_line);
+      return lineNum === currLine;
+    });
+
+  return (
+    <Box>
+      <Button onClick={handleBackClick} variant="contained" sx={{ mb: 2 }}>
+        Back
+      </Button>
+      <Typography variant="h6">
+        Block View for Block {currBlock ? `${currBlock.x},${currBlock.y},${currBlock.z}` : ''}
+      </Typography>
+      
+      {/* Variables Display */}
+      <Box sx={{ mt: 2, mb: 2, p: 2, border: '1px solid #ccc', borderRadius: 2 }}>
+        <Typography variant="h6">Variables (Line {currLine}):</Typography>
+        {Object.entries(variables).length > 0 ? (
+          Object.entries(variables).map(([key, value]) => (
+            <Typography key={key} variant="body2">
+              {key}: {JSON.stringify(value)}
+            </Typography>
+          ))
+        ) : (
+          <Typography variant="body2">No variables defined yet.</Typography>
+        )}
+      </Box>
+
+      {isLoading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+          <CircularProgress />
+        </Box>
+      )}
+      {error && (
+        <Typography variant="body2" color="error" sx={{ mt: 2 }}>
+          {error}
+        </Typography>
+      )}
+      {!isLoading && !error && processedData && (
+        <>
+          {currentResults && currentResults.length > 0 ? (
+            <Box sx={{ mt: 2 }}>
+              {currentResults.map((result, index) => (
+                <Box key={index} sx={{ mb: 2 }}>
+                  <Typography variant="subtitle1">Result {index + 1}:</Typography>
+                  <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {JSON.stringify(result, null, 2)}
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          ) : (
+            <Typography variant="body2" sx={{ mt: 2 }}>
+              No result available for the selected line.
+            </Typography>
+          )}
+        </>
+      )}
+    </Box>
+  );
+};
+
+export default BlockView;
+
+File: GridViewComponent.jsx
+// GridViewComponent.jsx
+import React, { useState, useEffect } from 'react';
+import { Box, Slider, Typography, Grid, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import GridBlock from './GridBlock';
+
+// Helper function to fetch data for visualization
+const fetchVisualizationData = async () => {
+  try {
+    const response = await fetch('http://73.106.153.51:5002/api/data');
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error fetching visualization data:', error);
+    return null;
+  }
+};
+
+// GridViewComponent now handles only grid display and block selection
+const GridViewComponent = ({ setCurrBlock }) => {
+  const [globalData, setGlobalData] = useState(null);  // Store global data
+  const [maxValues, setMaxValues] = useState([0, 0, 0]);  // Max X, Y, Z for the grid
+  const [sliderValues, setSliderValues] = useState([-1, -1, -1]);  // Slider values for X, Y, Z axes
+  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);  // Info dialog visibility
+
+  useEffect(() => {
+    // Fetch visualization data on component mount
+    const fetchData = async () => {
+      const data = await fetchVisualizationData();
+      if (data && data.ops && data.ops.visualization_data) {
+        setGlobalData(data);
+        determineMaxValues(data.ops.visualization_data);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Determine the maximum X, Y, Z values from the visualization data
   const determineMaxValues = (visualizationData) => {
-    console.log('determineMaxValues:', visualizationData);
     const keys = Object.keys(visualizationData);
     if (keys.length === 0) {
       setMaxValues([0, 0, 0]);
@@ -174,44 +373,29 @@ const GridViewComponent = ({ setCurrBlock }) => { // Accept setCurrBlock
       },
       [0, 0, 0]
     );
-
     setMaxValues(maxVals);
-    console.log('Max values:', maxVals);
   };
 
+  // Update slider values for each axis
   const handleSliderChange = (index, newValue) => {
     const newSliderValues = [...sliderValues];
     newSliderValues[index] = newValue;
     setSliderValues(newSliderValues);
   };
 
+  // Handle block click to set the selected block
   const handleBlockClick = (blockData) => {
-    console.log('Block clicked:', blockData);
-    setCurrBlock(blockData); // Update currBlock in App.jsx
-    setCurrentBlockData(blockData);
-    setCurrentView('block');
-  };
-  const handleBackClick = () => {
-    setCurrentView('main');
-    setCurrentBlockData(null);
+    setCurrBlock(blockData);
   };
 
-  const handlePrecompute = () => {
-    console.log('Precompute clicked');
-    // Implement precompute logic here
-  };
-
-  const handleInfoClick = () => {
-    setIsInfoPopupOpen(true);
-  };
-
+  // Render the grid based on slider and max values
   const renderGrid = () => {
     if (!globalData || !globalData.ops || !globalData.ops.visualization_data) return null;
 
     const [xMax, yMax, zMax] = maxValues;
     const [xSlider, ySlider, zSlider] = sliderValues;
 
-    // Determine the range for each axis: if slider is -1, iterate over all values, otherwise use the slider value.
+    // Determine the range for each axis: if slider is -1, iterate over all values, otherwise use the slider value
     const xValues = xSlider === -1 ? Array.from({ length: xMax + 1 }, (_, i) => i) : [xSlider];
     const yValues = ySlider === -1 ? Array.from({ length: yMax + 1 }, (_, i) => i) : [ySlider];
     const zValues = zSlider === -1 ? Array.from({ length: zMax + 1 }, (_, i) => i) : [zSlider];
@@ -230,15 +414,14 @@ const GridViewComponent = ({ setCurrBlock }) => { // Accept setCurrBlock
                     {blockData ? (
                       <GridBlock
                         data={{
-                          x: x,
-                          y: y,
-                          z: z,
+                          x,
+                          y,
+                          z,
                           operations: blockData,
                         }}
                         onClick={handleBlockClick}
                       />
                     ) : (
-                      // Placeholder for missing data
                       <Box
                         sx={{
                           width: 50,
@@ -260,62 +443,36 @@ const GridViewComponent = ({ setCurrBlock }) => { // Accept setCurrBlock
   };
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%', // Fill the parent container's height
-      }}
-    >
-      {currentView === 'main' ? (
-        <>
-          {/* Grid Display Area */}
-          <Box sx={{ flexGrow: 1, overflow: 'auto', mb: 2 }}>
-            {renderGrid()}
-          </Box>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Grid Display Area */}
+      <Box sx={{ flexGrow: 1, overflow: 'auto', mb: 2 }}>
+        {renderGrid()}
+      </Box>
 
-          {/* Sliders and Precompute Button */}
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
-            {['X', 'Y', 'Z'].map((axis, index) => (
-              <Box key={axis} sx={{ width: '30%' }}>
-                <Typography>{axis} Axis</Typography>
-                <Slider
-                  value={sliderValues[index]}
-                  onChange={(_, newValue) => handleSliderChange(index, newValue)}
-                  min={-1}
-                  max={maxValues[index]}
-                  step={1}
-                  marks
-                  valueLabelDisplay="auto"
-                />
-                <Typography variant="caption" sx={{ color: 'grey.500' }}>
-                  {sliderValues[index] === -1 ? 'All values' : `Value: ${sliderValues[index]}`}
-                </Typography>
-              </Box>
-            ))}
+      {/* Sliders for X, Y, Z axis */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
+        {['X', 'Y', 'Z'].map((axis, index) => (
+          <Box key={axis} sx={{ width: '30%' }}>
+            <Typography>{axis} Axis</Typography>
+            <Slider
+              value={sliderValues[index]}
+              onChange={(_, newValue) => handleSliderChange(index, newValue)}
+              min={-1}
+              max={maxValues[index]}
+              step={1}
+              marks
+              valueLabelDisplay="auto"
+            />
+            <Typography variant="caption" sx={{ color: 'grey.500' }}>
+              {sliderValues[index] === -1 ? 'All values' : `Value: ${sliderValues[index]}`}
+            </Typography>
           </Box>
-          <Button onClick={handlePrecompute} variant="contained" sx={{ mt: 2 }}>
-            Precompute
-          </Button>
-        </>
-      ) : (
-        // Block View
-        <Box>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-            <Button onClick={handleBackClick} variant="contained">
-              Back
-            </Button>
-            <Typography variant="h6">Block View</Typography>
-          </Box>
-          <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {JSON.stringify(currentBlockData, null, 2)}
-          </Typography>
-        </Box>
-      )}
+        ))}
+      </Box>
 
       {/* Info Button */}
       <Button
-        onClick={handleInfoClick}
+        onClick={() => setIsInfoPopupOpen(true)}
         variant="outlined"
         sx={{ position: 'absolute', top: 10, right: 10 }}
       >
@@ -338,181 +495,184 @@ const GridViewComponent = ({ setCurrBlock }) => { // Accept setCurrBlock
   );
 };
 
-const GridBlock = ({ data, onClick }) => {
-  const [processedData, setProcessedData] = useState(null);
-
-  useEffect(() => {
-    fetchAndLogBlockData(data.x, data.y, data.z)
-      .then(setProcessedData)
-      .catch(error => console.error('Failed to fetch block data:', error));
-  }, [data.x, data.y, data.z]);
-
-  return (
-    <Box 
-      onClick={() => onClick({ ...data, processedData })}
-      sx={{ 
-        p: 1, 
-        cursor: 'pointer', 
-        '&:hover': { bgcolor: 'action.hover' },
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        border: 1,
-        borderColor: 'grey.700',
-        borderRadius: 1,
-        bgcolor: 'grey.800',
-      }}
-    >
-      <Typography variant="caption">{`${data.x},${data.y},${data.z}`}</Typography>
-      <Typography variant="body2">Operations: {data.operations.length}</Typography>
-      {processedData && <Typography variant="caption">Processed</Typography>}
-    </Box>
-  );
-};
-
 export default GridViewComponent;
 
+
 File: CodeViewerComponent.jsx
-import React, { useEffect, useState, useRef } from 'react';
-import { Box, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Box,
+  Typography,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+} from '@mui/material';
 
-const CodeViewerComponent = ({ currBlock }) => {
-  const [codeLines, setCodeLines] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
+const CodeViewerComponent = ({
+  currBlock,
+  currLine,
+  setCurrLine,
+  codeLines,
+  loadingCode,
+  errorCode,
+}) => {
+  console.log('CodeViewerComponent rendered with props:', { currBlock, currLine, codeLines, loadingCode, errorCode });
 
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [linesToHighlight, setLinesToHighlight] = useState([]);
-  const [results, setResults] = useState([]);
   const codeContainerRef = useRef(null);
+  const [linesToHighlight, setLinesToHighlight] = useState([]);
 
+  // Refs to store the latest state for event handlers
+  const latestCurrLineRef = useRef(currLine);
+  const latestLinesToHighlightRef = useRef(linesToHighlight);
+
+  // Update refs whenever currLine or linesToHighlight changes
   useEffect(() => {
-    if (!currBlock) {
-      setCodeLines([]);
-      setLinesToHighlight([]);
-      setResults([]);
-      setCurrentIndex(0);
-      setLoading(false);
-      return;
-    }
+    console.log('Updating refs:', { currLine, linesToHighlight });
+    latestCurrLineRef.current = currLine;
+    latestLinesToHighlightRef.current = linesToHighlight;
+  }, [currLine, linesToHighlight]);
 
-    setCurrentIndex(0);
-    setLoading(true);
-
-    const fetchCode = async () => {
-      try {
-        const src = await fetchBlockSrc(); // Fetch the code asynchronously
-        const codeArray = src.split('\n');
-        setCodeLines(codeArray); // Set the code lines when fetched successfully
-
-        // Extract lines to highlight from currBlock
-        if (currBlock.processedData && currBlock.processedData.results) {
-          const fetchedResults = currBlock.processedData.results;
-          setResults(fetchedResults);
-
-          const lines = fetchedResults.map(result => {
-            const lineNum = findLineNumber(codeArray, result.source_line);
-            return lineNum;
-          }).filter(lineNum => lineNum !== -1);
-
-          setLinesToHighlight(lines);
-        } else {
-          setLinesToHighlight([]);
-          setResults([]);
-        }
-
-        // Debugging logs
-        console.log('currBlock:', currBlock);
-        console.log('linesToHighlight:', linesToHighlight);
-        console.log('linesToHighlight.length:', linesToHighlight.length);
-        console.log('currentIndex:', currentIndex);
-
-        setLoading(false); // Set loading to false when done
-      } catch (err) {
-        console.error('Error fetching block source code:', err);
-        setError('Failed to load code'); // Set error message
-        setLoading(false); // Set loading to false in case of error
-      }
-    };
-
-    fetchCode();
-  }, [currBlock]);
-
-  useEffect(() => {
-    highlightLine();
-  }, [currentIndex, linesToHighlight]);
-
-  // Key event listener to handle arrow key navigation
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === 'ArrowRight') {
-        stepForward();
-      } else if (event.key === 'ArrowLeft') {
-        stepBackward();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    // Clean up event listener on component unmount
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [currentIndex, results]);
-
-  const fetchBlockSrc = async () => {
-    try {
-      const response = await fetch('http://73.106.153.51:5002/get_src', {
-        method: 'GET',
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const text = await response.text(); // Wait for the text response
-      return text;
-    } catch (error) {
-      console.error('Error fetching block source code:', error);
-      throw error;
-    }
-  };
-
-  const findLineNumber = (codeArray, sourceLine) => {
-    for (let i = 0; i < codeArray.length; i++) {
-      if (codeArray[i].trim() === sourceLine.trim()) {
+  // Function to find the line number of a specific source line
+  const findLineNumber = (lines, sourceLine) => {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === sourceLine.trim()) {
         return i + 1; // Line numbers start at 1
       }
     }
     return -1; // Not found
   };
 
-  const highlightLine = () => {
-    if (codeContainerRef.current && linesToHighlight.length > 0) {
-      const lineNumber = linesToHighlight[currentIndex];
-      // Scroll to the line
-      const lineElement = document.getElementById(`code-line-${lineNumber}`);
+  // Determine which lines to highlight based on currBlock
+  useEffect(() => {
+    console.log('Determining lines to highlight. currBlock:', currBlock);
+    console.log('codeLines:', codeLines);
+
+    if (
+      !currBlock ||
+      !currBlock.processedData ||
+      !currBlock.processedData.results ||
+      !codeLines
+    ) {
+      console.log('Missing required data, setting linesToHighlight to empty array');
+      setLinesToHighlight([]);
+      return;
+    }
+
+    // Build the linesToHighlight array preserving control flow order
+    const highlightLines = currBlock.processedData.results
+      .map((result) => {
+        const lineNum = findLineNumber(codeLines, result.source_line);
+        console.log('Mapping result to line number:', { result, lineNum });
+        return lineNum;
+      })
+      .filter((lineNum) => lineNum !== -1);
+
+    console.log('Setting linesToHighlight:', highlightLines);
+    setLinesToHighlight(highlightLines);
+  }, [currBlock, codeLines]);
+
+  // Automatically set currLine to the first highlighted line or default to first line
+  useEffect(() => {
+    console.log('Setting initial currLine. linesToHighlight:', linesToHighlight);
+    console.log('codeLines length:', codeLines.length);
+    if (linesToHighlight.length > 0) {
+      console.log('Setting currLine to first highlighted line:', linesToHighlight[0]);
+      setCurrLine(linesToHighlight[0]);
+    } else if (codeLines.length > 0) {
+      console.log('Setting currLine to 1 (default)');
+      setCurrLine(1); // Default to first line if no highlights
+    }
+  }, [linesToHighlight, codeLines, setCurrLine]);
+
+  // Scroll to the current line when currLine changes
+  useEffect(() => {
+    console.log('Scrolling to currLine:', currLine);
+    if (currLine && codeContainerRef.current) {
+      const lineElement = document.getElementById(`code-line-${currLine}`);
       if (lineElement) {
+        console.log('Scrolling to line element:', lineElement);
         lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        console.log('Line element not found for currLine:', currLine);
       }
     }
-  };
+  }, [currLine]);
 
-  const stepForward = () => {
-    if (currentIndex < results.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+  // Handle keyboard navigation using left and right arrow keys
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      console.log('Key pressed:', event.key);
+      if (event.key === 'ArrowRight') {
+        event.preventDefault(); // Prevent default scrolling
+        handleNextLine();
+      } else if (event.key === 'ArrowLeft') {
+        event.preventDefault(); // Prevent default scrolling
+        handlePrevLine();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Clean up the event listener on component unmount
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Navigate to the previous highlighted line
+  const handlePrevLine = () => {
+    const { current: currentLine } = latestCurrLineRef;
+    const { current: currentHighlights } = latestLinesToHighlightRef;
+
+    console.log('Handling previous line. Current line:', currentLine);
+    console.log('Current highlights:', currentHighlights);
+
+    if (currentLine) {
+      const currentIndex = currentHighlights.indexOf(currentLine);
+      console.log('Current index in highlights:', currentIndex);
+      if (currentIndex > 0) {
+        const newLine = currentHighlights[currentIndex - 1];
+        console.log('Setting new line:', newLine);
+        setCurrLine(newLine);
+      } else {
+        console.log('Already at the first highlighted line');
+      }
+    } else {
+      console.log('No current line set');
     }
   };
 
-  const stepBackward = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
+  // Navigate to the next highlighted line
+  const handleNextLine = () => {
+    const { current: currentLine } = latestCurrLineRef;
+    const { current: currentHighlights } = latestLinesToHighlightRef;
+
+    console.log('Handling next line. Current line:', currentLine);
+    console.log('Current highlights:', currentHighlights);
+
+    if (currentLine) {
+      const currentIndex = currentHighlights.indexOf(currentLine);
+      console.log('Current index in highlights:', currentIndex);
+      if (currentIndex < currentHighlights.length - 1) {
+        const newLine = currentHighlights[currentIndex + 1];
+        console.log('Setting new line:', newLine);
+        setCurrLine(newLine);
+      } else {
+        console.log('Already at the last highlighted line');
+      }
+    } else {
+      console.log('No current line set');
     }
   };
 
-  // If there's an error, display an error message
-  if (error) {
+  // Info Dialog state
+  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
+
+  // If there's an error fetching code, display it
+  if (errorCode) {
+    console.log('Rendering error state');
     return (
       <Box
         sx={{
@@ -524,14 +684,15 @@ const CodeViewerComponent = ({ currBlock }) => {
         }}
       >
         <Typography variant="h6" color="white">
-          Error: {error}
+          Error: {errorCode}
         </Typography>
       </Box>
     );
   }
 
-  // If the content is still loading, display a loading message
-  if (loading) {
+  // If the code is still loading, display a loading message
+  if (loadingCode) {
+    console.log('Rendering loading state');
     return (
       <Box
         sx={{
@@ -549,21 +710,32 @@ const CodeViewerComponent = ({ currBlock }) => {
     );
   }
 
+  // If no block is selected, display a message
   if (!currBlock) {
+    console.log('Rendering no block selected state');
     return (
-      <Typography variant="h6" color="grey.500" align="center" sx={{ mt: 2 }}>
+      <Typography
+        variant="h6"
+        color="grey.500"
+        align="center"
+        sx={{ mt: 2 }}
+      >
         Select a block to view code
       </Typography>
     );
   }
+
+  console.log('Rendering main component');
+  console.log('linesToHighlight:', linesToHighlight);
+  console.log('currLine:', currLine);
 
   return (
     <Box
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%', // Fill parent container's height
-        position: 'relative', // To position the Info Button absolutely
+        height: '100%',
+        position: 'relative',
       }}
     >
       {/* Header Section */}
@@ -598,16 +770,21 @@ const CodeViewerComponent = ({ currBlock }) => {
       >
         {codeLines.map((line, index) => {
           const lineNumber = index + 1;
-          const isHighlighted =
-            linesToHighlight.length > 0 &&
-            linesToHighlight[currentIndex] === lineNumber;
+          const isHighlighted = linesToHighlight.includes(lineNumber);
+          const isCurrent = currLine === lineNumber;
+
           return (
             <div
               key={index}
               id={`code-line-${lineNumber}`}
               style={{
-                backgroundColor: isHighlighted ? 'rgba(255, 255, 0, 0.5)' : 'transparent',
+                backgroundColor: isCurrent
+                  ? 'rgba(255, 255, 0, 0.7)'
+                  : isHighlighted
+                  ? 'rgba(255, 255, 0, 0.3)'
+                  : 'transparent',
                 padding: '0 5px',
+                cursor: 'default',
               }}
             >
               <span style={{ color: '#888', userSelect: 'none' }}>
@@ -619,38 +796,34 @@ const CodeViewerComponent = ({ currBlock }) => {
         })}
       </Box>
 
-      {/* Result Details */}
-      {results.length > 0 && (
+      {/* Navigation Buttons */}
+      {linesToHighlight.length > 1 && (
         <Box
           sx={{
+            display: 'flex',
+            justifyContent: 'center',
             mt: 2,
-            p: 2,
-            bgcolor: 'grey.800',
-            borderRadius: 1,
-            maxHeight: '150px', // Fixed small height for Result Details
-            overflowY: 'auto', // Enable scrolling if content exceeds height
+            gap: 2,
           }}
         >
-          <Typography variant="subtitle1">Result Details:</Typography>
-          <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap' }}>
-            {JSON.stringify(results[currentIndex], null, 2)}
-          </Typography>
+          <Button
+            onClick={handlePrevLine}
+            disabled={currLine === linesToHighlight[0]}
+            variant="contained"
+          >
+            Previous
+          </Button>
+          <Button
+            onClick={handleNextLine}
+            disabled={
+              currLine === linesToHighlight[linesToHighlight.length - 1]
+            }
+            variant="contained"
+          >
+            Next
+          </Button>
         </Box>
       )}
-
-      {/* Navigation Buttons */}
-      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-        <Button onClick={stepBackward} disabled={currentIndex === 0} sx={{ mr: 1 }}>
-          Previous
-        </Button>
-        <Button
-          onClick={stepForward}
-          disabled={currentIndex >= results.length - 1}
-          sx={{ ml: 1 }}
-        >
-          Next
-        </Button>
-      </Box>
 
       {/* Info Button */}
       <Button
@@ -686,5 +859,4 @@ const CodeViewerComponent = ({ currBlock }) => {
 };
 
 export default CodeViewerComponent;
-
 

@@ -1,8 +1,9 @@
 // App.jsx
-import React, { useState } from 'react'; // Import useState
+import React, { useState, useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
 import GridViewComponent from './components/GridViewComponent';
 import CodeViewerComponent from './components/CodeViewerComponent';
+import BlockView from './components/BlockView';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 
 const darkTheme = createTheme({
@@ -12,16 +13,43 @@ const darkTheme = createTheme({
 });
 
 const App = () => {
-  const [currBlock, setCurrBlock] = useState(null); // Add currBlock state
+  const [currBlock, setCurrBlock] = useState(null); // Current selected block
+  const [currLine, setCurrLine] = useState(null);   // Current highlighted line
+  const [codeLines, setCodeLines] = useState([]);   // Source code lines
+  const [loadingCode, setLoadingCode] = useState(true);
+  const [errorCode, setErrorCode] = useState(null);
+  const [processedData, setProcessedData] = useState(null); // Store processed data
+
+  // Fetch the source code when the app mounts
+  useEffect(() => {
+    const fetchCode = async () => {
+      try {
+        const response = await fetch('http://73.106.153.51:5002/get_src', {
+          method: 'GET',
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const text = await response.text();
+        setCodeLines(text.split('\n'));
+        setLoadingCode(false);
+      } catch (error) {
+        console.error('Error fetching source code:', error);
+        setErrorCode('Failed to load source code.');
+        setLoadingCode(false);
+      }
+    };
+
+    fetchCode();
+  }, []);
 
   return (
     <ThemeProvider theme={darkTheme}>
-      {/* Root Container */}
       <Box
         sx={{
           display: 'flex',
           flexDirection: 'column',
-          height: '100vh', // Full viewport height
+          height: '100vh',
           bgcolor: 'grey.900',
           color: 'white',
         }}
@@ -37,35 +65,54 @@ const App = () => {
         <Box
           sx={{
             display: 'flex',
-            flexGrow: 1, // Fill remaining space after header
-            minHeight: 0, // Critical for allowing children to shrink
+            flexGrow: 1,
+            minHeight: 0,
           }}
         >
-          {/* Grid View - Left Side (60%) */}
+          {/* Left Side: GridView or BlockView */}
           <Box
             sx={{
-              flex: '0 0 60%', // Increased to 60% width
+              flex: '0 0 60%',
               p: 2,
               overflow: 'auto',
-              height: '100%', // Ensure it fills parent height
+              height: '100%',
             }}
           >
-            <GridViewComponent setCurrBlock={setCurrBlock} /> {/* Pass setCurrBlock */}
+            {currBlock === null ? (
+              <GridViewComponent setCurrBlock={setCurrBlock} />
+            ) : (
+              <BlockView
+                currBlock={currBlock}
+                setCurrBlock={setCurrBlock}
+                currLine={currLine}
+                codeLines={codeLines}
+                setProcessedData={setProcessedData}
+                processedData={processedData} // Passed as a prop
+              />
+            )}
           </Box>
 
-          {/* Code Viewer - Right Side (40%) */}
+          {/* Right Side: CodeViewer */}
           <Box
             sx={{
-              flex: '0 0 40%', // Reduced to 40% width
+              flex: '0 0 40%',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'flex-start',
               bgcolor: 'grey.800',
-              height: '100%', // Fill parent height
-              overflow: 'auto', // Allow scrolling if necessary
+              height: '100%',
+              overflow: 'auto',
             }}
           >
-            <CodeViewerComponent currBlock={currBlock} /> {/* Pass currBlock */}
+            <CodeViewerComponent
+              currBlock={currBlock}
+              currLine={currLine}
+              setCurrLine={setCurrLine}
+              codeLines={codeLines}
+              loadingCode={loadingCode}
+              errorCode={errorCode}
+              processedData={processedData} // Passed as a prop
+            />
           </Box>
         </Box>
       </Box>

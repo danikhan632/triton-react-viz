@@ -1,138 +1,143 @@
-// File: CodeViewerComponent.jsx
-import React, { useEffect, useState, useRef } from 'react';
-import { Box, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+// src/components/CodeViewerComponent.jsx
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Box,
+  Typography,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+} from '@mui/material';
 
-const CodeViewerComponent = ({ currBlock }) => {
-  const [codeLines, setCodeLines] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
-
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [linesToHighlight, setLinesToHighlight] = useState([]);
+const CodeViewerComponent = ({
+  currBlock,
+  currLine,
+  setCurrLine,
+  codeLines,
+  loadingCode,
+  errorCode,
+  processedData, // We now receive processedData
+}) => {
   const codeContainerRef = useRef(null);
+  const [linesToHighlight, setLinesToHighlight] = useState([]);
 
+  // Refs to store the latest state for event handlers
+  const latestCurrLineRef = useRef(currLine);
+  const latestLinesToHighlightRef = useRef(linesToHighlight);
+
+  // Update refs whenever currLine or linesToHighlight changes
   useEffect(() => {
-    if (!currBlock) {
-      setCodeLines([]);
-      setLinesToHighlight([]);
-      setCurrentIndex(0);
-      setLoading(false);
-      return;
-    }
+    latestCurrLineRef.current = currLine;
+    latestLinesToHighlightRef.current = linesToHighlight;
+  }, [currLine, linesToHighlight]);
 
-    setCurrentIndex(0);
-    setLoading(true);
-
-    const fetchCode = async () => {
-      try {
-        const src = await fetchBlockSrc(); // Fetch the code asynchronously
-        const codeArray = src.split('\n');
-        setCodeLines(codeArray); // Set the code lines when fetched successfully
-
-        // Extract lines to highlight from currBlock
-        if (currBlock.processedData && currBlock.processedData.results) {
-          const fetchedResults = currBlock.processedData.results;
-
-          const lines = fetchedResults.map(result => {
-            const lineNum = findLineNumber(codeArray, result.source_line);
-            return lineNum;
-          }).filter(lineNum => lineNum !== -1);
-
-          setLinesToHighlight(lines);
-        } else {
-          setLinesToHighlight([]);
-        }
-
-        // Debugging logs
-        console.log('currBlock:', currBlock);
-        console.log('linesToHighlight:', linesToHighlight);
-        console.log('linesToHighlight.length:', linesToHighlight.length);
-        console.log('currentIndex:', currentIndex);
-
-        setLoading(false); // Set loading to false when done
-      } catch (err) {
-        console.error('Error fetching block source code:', err);
-        setError('Failed to load code'); // Set error message
-        setLoading(false); // Set loading to false in case of error
-      }
-    };
-
-    fetchCode();
-  }, [currBlock]);
-
-  useEffect(() => {
-    highlightLine();
-  }, [currentIndex, linesToHighlight]);
-
-  // Key event listener to handle arrow key navigation
-  useEffect(() => {
-    const handleKeyDown = (event) => {
-      if (event.key === 'ArrowRight') {
-        stepForward();
-      } else if (event.key === 'ArrowLeft') {
-        stepBackward();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-
-    // Clean up event listener on component unmount
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [currentIndex, linesToHighlight]);
-
-  const fetchBlockSrc = async () => {
-    try {
-      const response = await fetch('http://73.106.153.51:5002/get_src', {
-        method: 'GET',
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      const text = await response.text(); // Wait for the text response
-      return text;
-    } catch (error) {
-      console.error('Error fetching block source code:', error);
-      throw error;
-    }
-  };
-
-  const findLineNumber = (codeArray, sourceLine) => {
-    for (let i = 0; i < codeArray.length; i++) {
-      if (codeArray[i].trim() === sourceLine.trim()) {
+  // Function to find the line number of a specific source line
+  const findLineNumber = (lines, sourceLine) => {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === sourceLine.trim()) {
         return i + 1; // Line numbers start at 1
       }
     }
     return -1; // Not found
   };
 
-  const highlightLine = () => {
-    if (codeContainerRef.current && linesToHighlight.length > 0) {
-      const lineNumber = linesToHighlight[currentIndex];
-      // Scroll to the line
-      const lineElement = document.getElementById(`code-line-${lineNumber}`);
+  // Determine which lines to highlight based on processedData
+  useEffect(() => {
+    if (!processedData || !processedData.results || !codeLines) {
+      setLinesToHighlight([]);
+      return;
+    }
+
+    // Extract unique line numbers based on control flow from results
+    const highlightSet = new Set();
+    processedData.results.forEach((result) => {
+      const lineNum = findLineNumber(codeLines, result.source_line);
+      if (lineNum !== -1) {
+        highlightSet.add(lineNum);
+      }
+    });
+
+    // Convert Set to Array and sort based on the order in results
+    const highlightLines = processedData.results
+      .map((result) => {
+        const lineNum = findLineNumber(codeLines, result.source_line);
+        return lineNum;
+      })
+      .filter((lineNum) => lineNum !== -1);
+
+    setLinesToHighlight(highlightLines);
+  }, [processedData, codeLines]);
+
+  // Automatically set currLine to the first highlighted line or default to first line
+  useEffect(() => {
+    if (linesToHighlight.length > 0) {
+      setCurrLine(linesToHighlight[0]);
+    } else if (codeLines.length > 0) {
+      setCurrLine(1); // Default to first line if no highlights
+    }
+  }, [linesToHighlight, codeLines, setCurrLine]);
+
+  // Scroll to the current line when currLine changes
+  useEffect(() => {
+    if (currLine && codeContainerRef.current) {
+      const lineElement = document.getElementById(`code-line-${currLine}`);
       if (lineElement) {
         lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
     }
-  };
+  }, [currLine]);
 
-  const stepForward = () => {
-    if (currentIndex < linesToHighlight.length - 1) {
-      setCurrentIndex(currentIndex + 1);
+  // Handle keyboard navigation using up and down arrow keys
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        handleNextLine();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        handlePrevLine();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const handlePrevLine = () => {
+    const { current: currentLine } = latestCurrLineRef;
+    const { current: currentHighlights } = latestLinesToHighlightRef;
+
+    if (currentLine) {
+      const currentIndex = currentHighlights.indexOf(currentLine);
+      if (currentIndex > 0) {
+        const newLine = currentHighlights[currentIndex - 1];
+        setCurrLine(newLine);
+      }
     }
   };
 
-  const stepBackward = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
+  const handleNextLine = () => {
+    const { current: currentLine } = latestCurrLineRef;
+    const { current: currentHighlights } = latestLinesToHighlightRef;
+
+    if (currentLine) {
+      const currentIndex = currentHighlights.indexOf(currentLine);
+      if (currentIndex < currentHighlights.length - 1) {
+        const newLine = currentHighlights[currentIndex + 1];
+        setCurrLine(newLine);
+      }
     }
   };
 
-  // If there's an error, display an error message
-  if (error) {
+  // Info Dialog state
+  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
+
+  // If there's an error fetching code, display it
+  if (errorCode) {
     return (
       <Box
         sx={{
@@ -144,14 +149,14 @@ const CodeViewerComponent = ({ currBlock }) => {
         }}
       >
         <Typography variant="h6" color="white">
-          Error: {error}
+          Error: {errorCode}
         </Typography>
       </Box>
     );
   }
 
-  // If the content is still loading, display a loading message
-  if (loading) {
+  // If the code is still loading, display a loading message
+  if (loadingCode) {
     return (
       <Box
         sx={{
@@ -169,9 +174,15 @@ const CodeViewerComponent = ({ currBlock }) => {
     );
   }
 
+  // If no block is selected, display a message
   if (!currBlock) {
     return (
-      <Typography variant="h6" color="grey.500" align="center" sx={{ mt: 2 }}>
+      <Typography
+        variant="h6"
+        color="grey.500"
+        align="center"
+        sx={{ mt: 2 }}
+      >
         Select a block to view code
       </Typography>
     );
@@ -182,8 +193,8 @@ const CodeViewerComponent = ({ currBlock }) => {
       sx={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%', // Fill parent container's height
-        position: 'relative', // To position the Info Button absolutely
+        height: '100%',
+        position: 'relative',
       }}
     >
       {/* Header Section */}
@@ -218,16 +229,18 @@ const CodeViewerComponent = ({ currBlock }) => {
       >
         {codeLines.map((line, index) => {
           const lineNumber = index + 1;
-          const isHighlighted =
-            linesToHighlight.length > 0 &&
-            linesToHighlight[currentIndex] === lineNumber;
+          const isCurrent = currLine === lineNumber;
+
           return (
             <div
               key={index}
               id={`code-line-${lineNumber}`}
               style={{
-                backgroundColor: isHighlighted ? 'rgba(255, 255, 0, 0.5)' : 'transparent',
+                backgroundColor: isCurrent
+                  ? 'rgba(255, 255, 0, 0.7)' // Highlighted color
+                  : 'transparent',
                 padding: '0 5px',
+                cursor: 'default',
               }}
             >
               <span style={{ color: '#888', userSelect: 'none' }}>
@@ -240,18 +253,33 @@ const CodeViewerComponent = ({ currBlock }) => {
       </Box>
 
       {/* Navigation Buttons */}
-      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-        <Button onClick={stepBackward} disabled={currentIndex === 0} sx={{ mr: 1 }}>
-          Previous
-        </Button>
-        <Button
-          onClick={stepForward}
-          disabled={currentIndex >= linesToHighlight.length - 1}
-          sx={{ ml: 1 }}
+      {linesToHighlight.length > 1 && (
+        <Box
+          sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            mt: 2,
+            gap: 2,
+          }}
         >
-          Next
-        </Button>
-      </Box>
+          <Button
+            onClick={handlePrevLine}
+            disabled={currLine === linesToHighlight[0]}
+            variant="contained"
+          >
+            Previous
+          </Button>
+          <Button
+            onClick={handleNextLine}
+            disabled={
+              currLine === linesToHighlight[linesToHighlight.length - 1]
+            }
+            variant="contained"
+          >
+            Next
+          </Button>
+        </Box>
+      )}
 
       {/* Info Button */}
       <Button
