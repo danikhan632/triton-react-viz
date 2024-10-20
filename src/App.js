@@ -1,5 +1,5 @@
 // App.jsx
-import React from 'react';
+import React, { useState } from 'react'; // Import useState
 import { Box, Typography } from '@mui/material';
 import GridViewComponent from './components/GridViewComponent';
 import CodeViewerComponent from './components/CodeViewerComponent';
@@ -12,6 +12,8 @@ const darkTheme = createTheme({
 });
 
 const App = () => {
+  const [currBlock, setCurrBlock] = useState(null); // Add currBlock state
+
   return (
     <ThemeProvider theme={darkTheme}>
       {/* Root Container */}
@@ -39,22 +41,22 @@ const App = () => {
             minHeight: 0, // Critical for allowing children to shrink
           }}
         >
-          {/* Grid View - Left Side (40%) */}
+          {/* Grid View - Left Side (60%) */}
           <Box
             sx={{
-              flex: '0 0 60%', // Increased to 40% width
+              flex: '0 0 60%', // Increased to 60% width
               p: 2,
               overflow: 'auto',
               height: '100%', // Ensure it fills parent height
             }}
           >
-            <GridViewComponent />
+            <GridViewComponent setCurrBlock={setCurrBlock} /> {/* Pass setCurrBlock */}
           </Box>
 
-          {/* Code Viewer - Right Side */}
+          {/* Code Viewer - Right Side (40%) */}
           <Box
             sx={{
-              flex: '0 0 40%', // Reduced to 60% width
+              flex: '0 0 40%', // Reduced to 40% width
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'flex-start',
@@ -63,9 +65,7 @@ const App = () => {
               overflow: 'auto', // Allow scrolling if necessary
             }}
           >
-
-              <CodeViewerComponent />
-  
+            <CodeViewerComponent currBlock={currBlock} /> {/* Pass currBlock */}
           </Box>
         </Box>
       </Box>

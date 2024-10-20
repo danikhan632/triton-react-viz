@@ -1,19 +1,55 @@
-// CodeViewerComponent.jsx
-import React, { useEffect, useState } from 'react';
+// File: CodeViewerComponent.jsx
+import React, { useEffect, useState, useRef } from 'react';
 import { Box, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
-import { CodeiumEditor, Document, Language } from "@codeium/react-code-editor";
 
-const CodeViewerComponent = () => {
-  const [code, setCode] = useState('');
-  const [loading, setLoading] = useState(true); // Track loading state
-  const [error, setError] = useState(null); // Track error state
+const CodeViewerComponent = ({ currBlock }) => {
+  const [codeLines, setCodeLines] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
 
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [linesToHighlight, setLinesToHighlight] = useState([]);
+  const codeContainerRef = useRef(null);
+
   useEffect(() => {
+    if (!currBlock) {
+      setCodeLines([]);
+      setLinesToHighlight([]);
+      setCurrentIndex(0);
+      setLoading(false);
+      return;
+    }
+
+    setCurrentIndex(0);
+    setLoading(true);
+
     const fetchCode = async () => {
       try {
         const src = await fetchBlockSrc(); // Fetch the code asynchronously
-        setCode(src); // Set the code when fetched successfully
+        const codeArray = src.split('\n');
+        setCodeLines(codeArray); // Set the code lines when fetched successfully
+
+        // Extract lines to highlight from currBlock
+        if (currBlock.processedData && currBlock.processedData.results) {
+          const fetchedResults = currBlock.processedData.results;
+
+          const lines = fetchedResults.map(result => {
+            const lineNum = findLineNumber(codeArray, result.source_line);
+            return lineNum;
+          }).filter(lineNum => lineNum !== -1);
+
+          setLinesToHighlight(lines);
+        } else {
+          setLinesToHighlight([]);
+        }
+
+        // Debugging logs
+        console.log('currBlock:', currBlock);
+        console.log('linesToHighlight:', linesToHighlight);
+        console.log('linesToHighlight.length:', linesToHighlight.length);
+        console.log('currentIndex:', currentIndex);
+
         setLoading(false); // Set loading to false when done
       } catch (err) {
         console.error('Error fetching block source code:', err);
@@ -23,7 +59,29 @@ const CodeViewerComponent = () => {
     };
 
     fetchCode();
-  }, []);
+  }, [currBlock]);
+
+  useEffect(() => {
+    highlightLine();
+  }, [currentIndex, linesToHighlight]);
+
+  // Key event listener to handle arrow key navigation
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'ArrowRight') {
+        stepForward();
+      } else if (event.key === 'ArrowLeft') {
+        stepBackward();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Clean up event listener on component unmount
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [currentIndex, linesToHighlight]);
 
   const fetchBlockSrc = async () => {
     try {
@@ -34,11 +92,42 @@ const CodeViewerComponent = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const text = await response.text(); // Wait for the text response
-      console.log(text);
       return text;
     } catch (error) {
       console.error('Error fetching block source code:', error);
       throw error;
+    }
+  };
+
+  const findLineNumber = (codeArray, sourceLine) => {
+    for (let i = 0; i < codeArray.length; i++) {
+      if (codeArray[i].trim() === sourceLine.trim()) {
+        return i + 1; // Line numbers start at 1
+      }
+    }
+    return -1; // Not found
+  };
+
+  const highlightLine = () => {
+    if (codeContainerRef.current && linesToHighlight.length > 0) {
+      const lineNumber = linesToHighlight[currentIndex];
+      // Scroll to the line
+      const lineElement = document.getElementById(`code-line-${lineNumber}`);
+      if (lineElement) {
+        lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  };
+
+  const stepForward = () => {
+    if (currentIndex < linesToHighlight.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+    }
+  };
+
+  const stepBackward = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
     }
   };
 
@@ -80,6 +169,14 @@ const CodeViewerComponent = () => {
     );
   }
 
+  if (!currBlock) {
+    return (
+      <Typography variant="h6" color="grey.500" align="center" sx={{ mt: 2 }}>
+        Select a block to view code
+      </Typography>
+    );
+  }
+
   return (
     <Box
       sx={{
@@ -89,14 +186,14 @@ const CodeViewerComponent = () => {
         position: 'relative', // To position the Info Button absolutely
       }}
     >
-      {/* Header Section - 35% Height */}
+      {/* Header Section */}
       <Box
         sx={{
-          flex: '0 0 15%', // Occupies 35% of the vertical space
+          flex: '0 0 15%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          mb: 2, // Adds margin below the header
+          mb: 2,
         }}
       >
         <Typography variant="h6" gutterBottom>
@@ -104,23 +201,56 @@ const CodeViewerComponent = () => {
         </Typography>
       </Box>
 
-      {/* Editor Section - 65% Height */}
+      {/* Code Display Section */}
       <Box
+        ref={codeContainerRef}
         sx={{
-          flex: '1 1 85%', // Occupies remaining 65% of the vertical space
+          flex: '1 1 85%',
           overflow: 'auto',
+          bgcolor: '#1e1e1e',
+          color: '#d4d4d4',
+          p: 2,
+          fontFamily: 'monospace',
+          whiteSpace: 'pre-wrap',
+          fontSize: '14px',
+          lineHeight: '1.5',
         }}
       >
-        <CodeiumEditor
-          language="python" // Adjust based on your code's language
-          theme="vs-dark"
-          value={code} // Provide the fetched code as the initial content.
-          options={{
-            readOnly: true, // Makes the editor read-only for viewing purposes.
-          }}
-          style={{ height: '100%', width: '100%' }} // Ensure it fills the parent Box
-          height={'100%'}
-        />
+        {codeLines.map((line, index) => {
+          const lineNumber = index + 1;
+          const isHighlighted =
+            linesToHighlight.length > 0 &&
+            linesToHighlight[currentIndex] === lineNumber;
+          return (
+            <div
+              key={index}
+              id={`code-line-${lineNumber}`}
+              style={{
+                backgroundColor: isHighlighted ? 'rgba(255, 255, 0, 0.5)' : 'transparent',
+                padding: '0 5px',
+              }}
+            >
+              <span style={{ color: '#888', userSelect: 'none' }}>
+                {lineNumber.toString().padStart(3, ' ')}:
+              </span>{' '}
+              {line}
+            </div>
+          );
+        })}
+      </Box>
+
+      {/* Navigation Buttons */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+        <Button onClick={stepBackward} disabled={currentIndex === 0} sx={{ mr: 1 }}>
+          Previous
+        </Button>
+        <Button
+          onClick={stepForward}
+          disabled={currentIndex >= linesToHighlight.length - 1}
+          sx={{ ml: 1 }}
+        >
+          Next
+        </Button>
       </Box>
 
       {/* Info Button */}
@@ -133,11 +263,19 @@ const CodeViewerComponent = () => {
       </Button>
 
       {/* Info Dialog */}
-      <Dialog open={isInfoPopupOpen} onClose={() => setIsInfoPopupOpen(false)} maxWidth="md" fullWidth>
+      <Dialog
+        open={isInfoPopupOpen}
+        onClose={() => setIsInfoPopupOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
         <DialogTitle>Kernel Source Code</DialogTitle>
         <DialogContent>
-          <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {code || 'No kernel source code available'}
+          <Typography
+            component="pre"
+            sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+          >
+            {codeLines.join('\n') || 'No kernel source code available'}
           </Typography>
         </DialogContent>
         <DialogActions>

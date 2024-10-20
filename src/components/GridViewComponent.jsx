@@ -12,7 +12,46 @@ import {
   DialogActions
 } from '@mui/material';
 
-const GridViewComponent = () => {
+
+
+const fetchAndLogBlockData = (gridX, gridY, gridZ) => {
+  console.log('Fetching data for block:', gridX, gridY, gridZ);
+
+  return fetch('http://73.106.153.51:5002/process_blocks', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      x: gridX,
+      y: gridY,
+      z: gridZ
+    })
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(data => {
+    // Assuming data.results is an array of objects and each object has 'changed_values'
+    data.results.forEach(entry => {
+      console.log('Entry:', entry);
+    });
+
+    console.log('Received data for block:', gridX, gridY, gridZ);
+    console.log(data);
+    return data;
+  })
+  .catch(error => {
+    console.error('Error fetching block data:', error);
+    throw error;
+  });
+};
+
+
+const GridViewComponent = ({ setCurrBlock }) => { // Accept setCurrBlock
   const [globalData, setGlobalData] = useState(null);
   const [currentView, setCurrentView] = useState('main');
   const [maxValues, setMaxValues] = useState([0, 0, 0]);
@@ -67,10 +106,11 @@ const GridViewComponent = () => {
   };
 
   const handleBlockClick = (blockData) => {
+    console.log('Block clicked:', blockData);
+    setCurrBlock(blockData); // Update currBlock in App.jsx
     setCurrentBlockData(blockData);
     setCurrentView('block');
   };
-
   const handleBackClick = () => {
     setCurrentView('main');
     setCurrentBlockData(null);
@@ -218,27 +258,38 @@ const GridViewComponent = () => {
   );
 };
 
-const GridBlock = ({ data, onClick }) => (
-  <Box 
-    onClick={() => onClick(data)}
-    sx={{ 
-      p: 1, 
-      cursor: 'pointer', 
-      '&:hover': { bgcolor: 'action.hover' },
-      height: '100%',
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      border: 1,
-      borderColor: 'grey.700',
-      borderRadius: 1,
-      bgcolor: 'grey.800',
-    }}
-  >
-    <Typography variant="caption">{`${data.x},${data.y},${data.z}`}</Typography>
-    <Typography variant="body2">Operations: {data.operations.length}</Typography>
-  </Box>
-);
+const GridBlock = ({ data, onClick }) => {
+  const [processedData, setProcessedData] = useState(null);
+
+  useEffect(() => {
+    fetchAndLogBlockData(data.x, data.y, data.z)
+      .then(setProcessedData)
+      .catch(error => console.error('Failed to fetch block data:', error));
+  }, [data.x, data.y, data.z]);
+
+  return (
+    <Box 
+      onClick={() => onClick({ ...data, processedData })}
+      sx={{ 
+        p: 1, 
+        cursor: 'pointer', 
+        '&:hover': { bgcolor: 'action.hover' },
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        border: 1,
+        borderColor: 'grey.700',
+        borderRadius: 1,
+        bgcolor: 'grey.800',
+      }}
+    >
+      <Typography variant="caption">{`${data.x},${data.y},${data.z}`}</Typography>
+      <Typography variant="body2">Operations: {data.operations.length}</Typography>
+      {processedData && <Typography variant="caption">Processed</Typography>}
+    </Box>
+  );
+};
 
 export default GridViewComponent;

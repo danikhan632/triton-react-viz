@@ -1,0 +1,690 @@
+File: GridBlock.jsx
+import React, { useEffect, useState } from 'react';
+import { Box, Typography } from '@mui/material';
+
+const fetchAndLogBlockData = (gridX, gridY, gridZ) => {
+  console.log('Fetching data for block:', gridX, gridY, gridZ);
+
+  return fetch('http://73.106.153.51:5002/process_blocks', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      x: gridX,
+      y: gridY,
+      z: gridZ
+    })
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(data => {
+    console.log('Received data for block:', gridX, gridY, gridZ);
+    console.log(data);
+    return data;
+  })
+  .catch(error => {
+    console.error('Error fetching block data:', error);
+    throw error;
+  });
+};
+
+const GridBlock = ({ data, onClick }) => {
+  const [processedData, setProcessedData] = useState(null);
+
+  useEffect(() => {
+    fetchAndLogBlockData(data.x, data.y, data.z)
+      .then(setProcessedData)
+      .catch(error => console.error('Failed to fetch block data:', error));
+  }, [data.x, data.y, data.z]);
+
+  const handleClick = () => {
+    if (processedData && processedData.source_line) {
+      onClick({ ...data, processedData, lineToHighlight: processedData.source_line });
+    } else {
+      onClick({ ...data, processedData });
+    }
+  };
+
+  return (
+    <Box 
+      onClick={handleClick}
+      sx={{ 
+        p: 1, 
+        cursor: 'pointer', 
+        '&:hover': { bgcolor: 'action.hover' },
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        border: 1,
+        borderColor: 'grey.700',
+        borderRadius: 1,
+        bgcolor: 'grey.800',
+      }}
+    >
+      <Typography variant="caption">{`${data.x},${data.y},${data.z}`}</Typography>
+      <Typography variant="body2">Operations: {data.operations.length}</Typography>
+      {processedData && <Typography variant="caption">Processed</Typography>}
+    </Box>
+  );
+};
+
+export default GridBlock;
+
+File: GridViewComponent.jsx
+// GridViewComponent.jsx
+import React, { useState, useEffect } from 'react';
+import { 
+  Box, 
+  Button, 
+  Slider, 
+  Typography, 
+  Grid,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions
+} from '@mui/material';
+
+
+
+const fetchAndLogBlockData = (gridX, gridY, gridZ) => {
+  console.log('Fetching data for block:', gridX, gridY, gridZ);
+
+  return fetch('http://73.106.153.51:5002/process_blocks', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      x: gridX,
+      y: gridY,
+      z: gridZ
+    })
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    return response.json();
+  })
+  .then(data => {
+    // Assuming data.results is an array of objects and each object has 'changed_values'
+    data.results.forEach(entry => {
+      console.log('Entry:', entry);
+    });
+
+    console.log('Received data for block:', gridX, gridY, gridZ);
+    console.log(data);
+    return data;
+  })
+  .catch(error => {
+    console.error('Error fetching block data:', error);
+    throw error;
+  });
+};
+
+
+const GridViewComponent = ({ setCurrBlock }) => { // Accept setCurrBlock
+  const [globalData, setGlobalData] = useState(null);
+  const [currentView, setCurrentView] = useState('main');
+  const [maxValues, setMaxValues] = useState([0, 0, 0]);
+  const [currentBlockData, setCurrentBlockData] = useState(null);
+  const [sliderValues, setSliderValues] = useState([-1, -1, -1]);  // Default to -1 for no filtering
+  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const response = await fetch('http://73.106.153.51:5002/api/data');
+      const data = await response.json();
+      setGlobalData(data);
+      console.log(data.ops.visualization_data);
+      determineMaxValues(data.ops.visualization_data);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+  };
+
+  const determineMaxValues = (visualizationData) => {
+    console.log('determineMaxValues:', visualizationData);
+    const keys = Object.keys(visualizationData);
+    if (keys.length === 0) {
+      setMaxValues([0, 0, 0]);
+      return;
+    }
+
+    const maxVals = keys.reduce(
+      (max, key) => {
+        const [x, y, z] = key.split('_').map(Number);
+        return [
+          Math.max(max[0], x),
+          Math.max(max[1], y),
+          Math.max(max[2], z),
+        ];
+      },
+      [0, 0, 0]
+    );
+
+    setMaxValues(maxVals);
+    console.log('Max values:', maxVals);
+  };
+
+  const handleSliderChange = (index, newValue) => {
+    const newSliderValues = [...sliderValues];
+    newSliderValues[index] = newValue;
+    setSliderValues(newSliderValues);
+  };
+
+  const handleBlockClick = (blockData) => {
+    console.log('Block clicked:', blockData);
+    setCurrBlock(blockData); // Update currBlock in App.jsx
+    setCurrentBlockData(blockData);
+    setCurrentView('block');
+  };
+  const handleBackClick = () => {
+    setCurrentView('main');
+    setCurrentBlockData(null);
+  };
+
+  const handlePrecompute = () => {
+    console.log('Precompute clicked');
+    // Implement precompute logic here
+  };
+
+  const handleInfoClick = () => {
+    setIsInfoPopupOpen(true);
+  };
+
+  const renderGrid = () => {
+    if (!globalData || !globalData.ops || !globalData.ops.visualization_data) return null;
+
+    const [xMax, yMax, zMax] = maxValues;
+    const [xSlider, ySlider, zSlider] = sliderValues;
+
+    // Determine the range for each axis: if slider is -1, iterate over all values, otherwise use the slider value.
+    const xValues = xSlider === -1 ? Array.from({ length: xMax + 1 }, (_, i) => i) : [xSlider];
+    const yValues = ySlider === -1 ? Array.from({ length: yMax + 1 }, (_, i) => i) : [ySlider];
+    const zValues = zSlider === -1 ? Array.from({ length: zMax + 1 }, (_, i) => i) : [zSlider];
+
+    return (
+      <Grid container spacing={1}>
+        {zValues.map((z) => (
+          yValues.map((y) => (
+            <Grid container item xs={12} spacing={1} key={`row-${y}-${z}`}>
+              {xValues.map((x) => {
+                const key = `${x}_${y}_${z}`;
+                const blockData = globalData.ops.visualization_data[key];
+
+                return (
+                  <Grid item key={key}>
+                    {blockData ? (
+                      <GridBlock
+                        data={{
+                          x: x,
+                          y: y,
+                          z: z,
+                          operations: blockData,
+                        }}
+                        onClick={handleBlockClick}
+                      />
+                    ) : (
+                      // Placeholder for missing data
+                      <Box
+                        sx={{
+                          width: 50,
+                          height: 50,
+                          bgcolor: 'grey.800',
+                          border: 1,
+                          borderColor: 'grey.700',
+                        }}
+                      />
+                    )}
+                  </Grid>
+                );
+              })}
+            </Grid>
+          ))
+        ))}
+      </Grid>
+    );
+  };
+
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%', // Fill the parent container's height
+      }}
+    >
+      {currentView === 'main' ? (
+        <>
+          {/* Grid Display Area */}
+          <Box sx={{ flexGrow: 1, overflow: 'auto', mb: 2 }}>
+            {renderGrid()}
+          </Box>
+
+          {/* Sliders and Precompute Button */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
+            {['X', 'Y', 'Z'].map((axis, index) => (
+              <Box key={axis} sx={{ width: '30%' }}>
+                <Typography>{axis} Axis</Typography>
+                <Slider
+                  value={sliderValues[index]}
+                  onChange={(_, newValue) => handleSliderChange(index, newValue)}
+                  min={-1}
+                  max={maxValues[index]}
+                  step={1}
+                  marks
+                  valueLabelDisplay="auto"
+                />
+                <Typography variant="caption" sx={{ color: 'grey.500' }}>
+                  {sliderValues[index] === -1 ? 'All values' : `Value: ${sliderValues[index]}`}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+          <Button onClick={handlePrecompute} variant="contained" sx={{ mt: 2 }}>
+            Precompute
+          </Button>
+        </>
+      ) : (
+        // Block View
+        <Box>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Button onClick={handleBackClick} variant="contained">
+              Back
+            </Button>
+            <Typography variant="h6">Block View</Typography>
+          </Box>
+          <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {JSON.stringify(currentBlockData, null, 2)}
+          </Typography>
+        </Box>
+      )}
+
+      {/* Info Button */}
+      <Button
+        onClick={handleInfoClick}
+        variant="outlined"
+        sx={{ position: 'absolute', top: 10, right: 10 }}
+      >
+        Info
+      </Button>
+
+      {/* Info Dialog */}
+      <Dialog open={isInfoPopupOpen} onClose={() => setIsInfoPopupOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Kernel Source Code</DialogTitle>
+        <DialogContent>
+          <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {globalData?.kernel_src || 'No kernel source code available'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsInfoPopupOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+};
+
+const GridBlock = ({ data, onClick }) => {
+  const [processedData, setProcessedData] = useState(null);
+
+  useEffect(() => {
+    fetchAndLogBlockData(data.x, data.y, data.z)
+      .then(setProcessedData)
+      .catch(error => console.error('Failed to fetch block data:', error));
+  }, [data.x, data.y, data.z]);
+
+  return (
+    <Box 
+      onClick={() => onClick({ ...data, processedData })}
+      sx={{ 
+        p: 1, 
+        cursor: 'pointer', 
+        '&:hover': { bgcolor: 'action.hover' },
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        border: 1,
+        borderColor: 'grey.700',
+        borderRadius: 1,
+        bgcolor: 'grey.800',
+      }}
+    >
+      <Typography variant="caption">{`${data.x},${data.y},${data.z}`}</Typography>
+      <Typography variant="body2">Operations: {data.operations.length}</Typography>
+      {processedData && <Typography variant="caption">Processed</Typography>}
+    </Box>
+  );
+};
+
+export default GridViewComponent;
+
+File: CodeViewerComponent.jsx
+import React, { useEffect, useState, useRef } from 'react';
+import { Box, Typography, Button, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+
+const CodeViewerComponent = ({ currBlock }) => {
+  const [codeLines, setCodeLines] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
+
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [linesToHighlight, setLinesToHighlight] = useState([]);
+  const [results, setResults] = useState([]);
+  const codeContainerRef = useRef(null);
+
+  useEffect(() => {
+    if (!currBlock) {
+      setCodeLines([]);
+      setLinesToHighlight([]);
+      setResults([]);
+      setCurrentIndex(0);
+      setLoading(false);
+      return;
+    }
+
+    setCurrentIndex(0);
+    setLoading(true);
+
+    const fetchCode = async () => {
+      try {
+        const src = await fetchBlockSrc(); // Fetch the code asynchronously
+        const codeArray = src.split('\n');
+        setCodeLines(codeArray); // Set the code lines when fetched successfully
+
+        // Extract lines to highlight from currBlock
+        if (currBlock.processedData && currBlock.processedData.results) {
+          const fetchedResults = currBlock.processedData.results;
+          setResults(fetchedResults);
+
+          const lines = fetchedResults.map(result => {
+            const lineNum = findLineNumber(codeArray, result.source_line);
+            return lineNum;
+          }).filter(lineNum => lineNum !== -1);
+
+          setLinesToHighlight(lines);
+        } else {
+          setLinesToHighlight([]);
+          setResults([]);
+        }
+
+        // Debugging logs
+        console.log('currBlock:', currBlock);
+        console.log('linesToHighlight:', linesToHighlight);
+        console.log('linesToHighlight.length:', linesToHighlight.length);
+        console.log('currentIndex:', currentIndex);
+
+        setLoading(false); // Set loading to false when done
+      } catch (err) {
+        console.error('Error fetching block source code:', err);
+        setError('Failed to load code'); // Set error message
+        setLoading(false); // Set loading to false in case of error
+      }
+    };
+
+    fetchCode();
+  }, [currBlock]);
+
+  useEffect(() => {
+    highlightLine();
+  }, [currentIndex, linesToHighlight]);
+
+  // Key event listener to handle arrow key navigation
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (event.key === 'ArrowRight') {
+        stepForward();
+      } else if (event.key === 'ArrowLeft') {
+        stepBackward();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Clean up event listener on component unmount
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [currentIndex, results]);
+
+  const fetchBlockSrc = async () => {
+    try {
+      const response = await fetch('http://73.106.153.51:5002/get_src', {
+        method: 'GET',
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const text = await response.text(); // Wait for the text response
+      return text;
+    } catch (error) {
+      console.error('Error fetching block source code:', error);
+      throw error;
+    }
+  };
+
+  const findLineNumber = (codeArray, sourceLine) => {
+    for (let i = 0; i < codeArray.length; i++) {
+      if (codeArray[i].trim() === sourceLine.trim()) {
+        return i + 1; // Line numbers start at 1
+      }
+    }
+    return -1; // Not found
+  };
+
+  const highlightLine = () => {
+    if (codeContainerRef.current && linesToHighlight.length > 0) {
+      const lineNumber = linesToHighlight[currentIndex];
+      // Scroll to the line
+      const lineElement = document.getElementById(`code-line-${lineNumber}`);
+      if (lineElement) {
+        lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  };
+
+  const stepForward = () => {
+    if (currentIndex < results.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+    }
+  };
+
+  const stepBackward = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex(currentIndex - 1);
+    }
+  };
+
+  // If there's an error, display an error message
+  if (error) {
+    return (
+      <Box
+        sx={{
+          width: '100%',
+          height: '100%',
+          bgcolor: 'red.800',
+          p: 2,
+          borderRadius: 1,
+        }}
+      >
+        <Typography variant="h6" color="white">
+          Error: {error}
+        </Typography>
+      </Box>
+    );
+  }
+
+  // If the content is still loading, display a loading message
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          width: '100%',
+          height: '100%',
+          bgcolor: 'grey.800',
+          p: 2,
+          borderRadius: 1,
+        }}
+      >
+        <Typography variant="h6" color="grey.500">
+          Loading...
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (!currBlock) {
+    return (
+      <Typography variant="h6" color="grey.500" align="center" sx={{ mt: 2 }}>
+        Select a block to view code
+      </Typography>
+    );
+  }
+
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%', // Fill parent container's height
+        position: 'relative', // To position the Info Button absolutely
+      }}
+    >
+      {/* Header Section */}
+      <Box
+        sx={{
+          flex: '0 0 15%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          mb: 2,
+        }}
+      >
+        <Typography variant="h6" gutterBottom>
+          Source Code Viewer
+        </Typography>
+      </Box>
+
+      {/* Code Display Section */}
+      <Box
+        ref={codeContainerRef}
+        sx={{
+          flex: '1 1 85%',
+          overflow: 'auto',
+          bgcolor: '#1e1e1e',
+          color: '#d4d4d4',
+          p: 2,
+          fontFamily: 'monospace',
+          whiteSpace: 'pre-wrap',
+          fontSize: '14px',
+          lineHeight: '1.5',
+        }}
+      >
+        {codeLines.map((line, index) => {
+          const lineNumber = index + 1;
+          const isHighlighted =
+            linesToHighlight.length > 0 &&
+            linesToHighlight[currentIndex] === lineNumber;
+          return (
+            <div
+              key={index}
+              id={`code-line-${lineNumber}`}
+              style={{
+                backgroundColor: isHighlighted ? 'rgba(255, 255, 0, 0.5)' : 'transparent',
+                padding: '0 5px',
+              }}
+            >
+              <span style={{ color: '#888', userSelect: 'none' }}>
+                {lineNumber.toString().padStart(3, ' ')}:
+              </span>{' '}
+              {line}
+            </div>
+          );
+        })}
+      </Box>
+
+      {/* Result Details */}
+      {results.length > 0 && (
+        <Box
+          sx={{
+            mt: 2,
+            p: 2,
+            bgcolor: 'grey.800',
+            borderRadius: 1,
+            maxHeight: '150px', // Fixed small height for Result Details
+            overflowY: 'auto', // Enable scrolling if content exceeds height
+          }}
+        >
+          <Typography variant="subtitle1">Result Details:</Typography>
+          <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(results[currentIndex], null, 2)}
+          </Typography>
+        </Box>
+      )}
+
+      {/* Navigation Buttons */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+        <Button onClick={stepBackward} disabled={currentIndex === 0} sx={{ mr: 1 }}>
+          Previous
+        </Button>
+        <Button
+          onClick={stepForward}
+          disabled={currentIndex >= results.length - 1}
+          sx={{ ml: 1 }}
+        >
+          Next
+        </Button>
+      </Box>
+
+      {/* Info Button */}
+      <Button
+        onClick={() => setIsInfoPopupOpen(true)}
+        variant="outlined"
+        sx={{ position: 'absolute', bottom: 10, right: 10 }}
+      >
+        Info
+      </Button>
+
+      {/* Info Dialog */}
+      <Dialog
+        open={isInfoPopupOpen}
+        onClose={() => setIsInfoPopupOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Kernel Source Code</DialogTitle>
+        <DialogContent>
+          <Typography
+            component="pre"
+            sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+          >
+            {codeLines.join('\n') || 'No kernel source code available'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsInfoPopupOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+};
+
+export default CodeViewerComponent;
+
+
