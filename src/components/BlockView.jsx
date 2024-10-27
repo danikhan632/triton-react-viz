@@ -109,6 +109,10 @@ const TensorMesh = React.memo(({ value, dims, varName, setHoveredInfo, position 
         >
           <boxGeometry args={[0.9, 0.9, 0.9]} />
           <meshStandardMaterial color={interpolateColor(normalizedVal)} />
+          <lineSegments>
+            <edgesGeometry attach="geometry" args={[new THREE.BoxGeometry(0.9, 0.9, 0.9)]} />
+            <lineBasicMaterial attach="material" color="black" />
+          </lineSegments>
         </mesh>
       );
     }
@@ -230,7 +234,6 @@ const CustomCameraControls = () => {
 
   return null;
 };
-
 // TensorsVisualization Component
 const TensorsVisualization = React.memo(({ tensorVariables, setHoveredInfo }) => {
   const spacing = 50;
