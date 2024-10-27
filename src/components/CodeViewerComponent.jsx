@@ -1,5 +1,5 @@
 // src/components/CodeViewerComponent.jsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -9,6 +9,8 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material';
+import PropTypes from 'prop-types';
+import isEqual from 'lodash/isEqual'; // Import lodash's isEqual for deep comparison
 
 const CodeViewerComponent = ({
   currBlock,
@@ -20,36 +22,15 @@ const CodeViewerComponent = ({
   processedData, // We now receive processedData
 }) => {
   const codeContainerRef = useRef(null);
-  const [linesToHighlight, setLinesToHighlight] = useState([]);
+  const [currentHighlightIndex, setCurrentHighlightIndex] = useState(0); // Track current highlight index
+  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
 
-  // Refs to store the latest state for event handlers
-  const latestCurrLineRef = useRef(currLine);
-  const latestLinesToHighlightRef = useRef(linesToHighlight);
-
-  // Update refs whenever currLine or linesToHighlight changes
-  useEffect(() => {
-    latestCurrLineRef.current = currLine;
-    latestLinesToHighlightRef.current = linesToHighlight;
-  }, [currLine, linesToHighlight]);
-
-  // Function to find the line number of a specific source line
-  const findLineNumber = (lines, sourceLine) => {
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim() === sourceLine.trim()) {
-        return i + 1; // Line numbers start at 1
-      }
-    }
-    return -1; // Not found
-  };
-
-  // Determine which lines to highlight based on processedData
-  useEffect(() => {
+  // Memoize linesToHighlight to prevent unnecessary recalculations
+  const linesToHighlight = useMemo(() => {
     if (!processedData || !processedData.results || !codeLines) {
-      setLinesToHighlight([]);
-      return;
+      return [];
     }
 
-    // Extract unique line numbers based on control flow from results
     const highlightSet = new Set();
     processedData.results.forEach((result) => {
       const lineNum = findLineNumber(codeLines, result.source_line);
@@ -58,25 +39,28 @@ const CodeViewerComponent = ({
       }
     });
 
-    // Convert Set to Array and sort based on the order in results
+    // Convert Set to Array and maintain order based on results
     const highlightLines = processedData.results
       .map((result) => {
         const lineNum = findLineNumber(codeLines, result.source_line);
         return lineNum;
       })
-      .filter((lineNum) => lineNum !== -1);
+      .filter((lineNum) => lineNum !== -1 && highlightSet.has(lineNum));
 
-    setLinesToHighlight(highlightLines);
+    return highlightLines;
   }, [processedData, codeLines]);
 
-  // Automatically set currLine to the first highlighted line or default to first line
+  // Initialize or reset currentHighlightIndex when linesToHighlight changes
   useEffect(() => {
     if (linesToHighlight.length > 0) {
+      setCurrentHighlightIndex(0);
       setCurrLine(linesToHighlight[0]);
     } else if (codeLines.length > 0) {
+      setCurrentHighlightIndex(0);
       setCurrLine(1); // Default to first line if no highlights
     }
-  }, [linesToHighlight, codeLines, setCurrLine]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linesToHighlight]);
 
   // Scroll to the current line when currLine changes
   useEffect(() => {
@@ -105,36 +89,34 @@ const CodeViewerComponent = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentHighlightIndex, linesToHighlight]);
 
   const handlePrevLine = () => {
-    const { current: currentLine } = latestCurrLineRef;
-    const { current: currentHighlights } = latestLinesToHighlightRef;
-
-    if (currentLine) {
-      const currentIndex = currentHighlights.indexOf(currentLine);
-      if (currentIndex > 0) {
-        const newLine = currentHighlights[currentIndex - 1];
-        setCurrLine(newLine);
-      }
+    if (currentHighlightIndex > 0) {
+      const newIndex = currentHighlightIndex - 1;
+      setCurrentHighlightIndex(newIndex);
+      setCurrLine(linesToHighlight[newIndex]);
     }
   };
 
   const handleNextLine = () => {
-    const { current: currentLine } = latestCurrLineRef;
-    const { current: currentHighlights } = latestLinesToHighlightRef;
-
-    if (currentLine) {
-      const currentIndex = currentHighlights.indexOf(currentLine);
-      if (currentIndex < currentHighlights.length - 1) {
-        const newLine = currentHighlights[currentIndex + 1];
-        setCurrLine(newLine);
-      }
+    if (currentHighlightIndex < linesToHighlight.length - 1) {
+      const newIndex = currentHighlightIndex + 1;
+      setCurrentHighlightIndex(newIndex);
+      setCurrLine(linesToHighlight[newIndex]);
     }
   };
 
-  // Info Dialog state
-  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
+  // Function to find the line number of a specific source line
+  function findLineNumber(lines, sourceLine) {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === sourceLine.trim()) {
+        return i + 1; // Line numbers start at 1
+      }
+    }
+    return -1; // Not found
+  }
 
   // If there's an error fetching code, display it
   if (errorCode) {
@@ -264,16 +246,14 @@ const CodeViewerComponent = ({
         >
           <Button
             onClick={handlePrevLine}
-            disabled={currLine === linesToHighlight[0]}
+            disabled={currentHighlightIndex === 0}
             variant="contained"
           >
             Previous
           </Button>
           <Button
             onClick={handleNextLine}
-            disabled={
-              currLine === linesToHighlight[linesToHighlight.length - 1]
-            }
+            disabled={currentHighlightIndex === linesToHighlight.length - 1}
             variant="contained"
           >
             Next
@@ -312,6 +292,16 @@ const CodeViewerComponent = ({
       </Dialog>
     </Box>
   );
+};
+
+CodeViewerComponent.propTypes = {
+  currBlock: PropTypes.object,
+  currLine: PropTypes.number,
+  setCurrLine: PropTypes.func.isRequired,
+  codeLines: PropTypes.array.isRequired,
+  loadingCode: PropTypes.bool.isRequired,
+  errorCode: PropTypes.string,
+  processedData: PropTypes.object,
 };
 
 export default CodeViewerComponent;

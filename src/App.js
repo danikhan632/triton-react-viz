@@ -1,10 +1,11 @@
-// App.jsx
-import React, { useState, useEffect } from 'react';
+// src/App.jsx
+import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Typography } from '@mui/material';
 import GridViewComponent from './components/GridViewComponent';
 import CodeViewerComponent from './components/CodeViewerComponent';
 import BlockView from './components/BlockView';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
+import isEqual from 'lodash/isEqual'; // Import lodash's isEqual for deep comparison
 
 const darkTheme = createTheme({
   palette: {
@@ -19,6 +20,13 @@ const App = () => {
   const [loadingCode, setLoadingCode] = useState(true);
   const [errorCode, setErrorCode] = useState(null);
   const [processedData, setProcessedData] = useState(null); // Store processed data
+
+  // Function to set processedData only if it's different
+  const updateProcessedData = useCallback((newData) => {
+    if (!isEqual(newData, processedData)) {
+      setProcessedData(newData);
+    }
+  }, [processedData]);
 
   // Fetch the source code when the app mounts
   useEffect(() => {
@@ -86,7 +94,7 @@ const App = () => {
                 setCurrBlock={setCurrBlock}
                 currLine={currLine}
                 codeLines={codeLines}
-                setProcessedData={setProcessedData}
+                setProcessedData={updateProcessedData} // Use the callback
                 processedData={processedData} // Passed as a prop
               />
             )}
