@@ -15,6 +15,8 @@ const BlockView = ({
   const [isLoading, setIsLoading] = useState(false);
   const [variables, setVariables] = useState({});
   const [hoveredInfo, setHoveredInfo] = useState(null);
+  const [cameraControls, setCameraControls] = useState(null);
+
 
   const findLineNumber = (sourceLine) => {
     for (let i = 0; i < codeLines.length; i++) {
@@ -110,6 +112,22 @@ const BlockView = ({
     });
   };
 
+  const handleFocusTensor = (index) => {
+    if (cameraControls) {
+      const spacing = 50;
+      const numTensors = tensorVariables.length;
+      const totalWidth = (numTensors - 1) * spacing;
+      const position = [-totalWidth / 2 + index * spacing, -9, -50];
+      cameraControls.focusOnPosition(position);
+    }
+  };
+
+  const handleResetView = () => {
+    if (cameraControls) {
+      cameraControls.resetView();
+    }
+  };
+
   const tensorVariables = Object.entries(variables).filter(([, variable]) => {
     const { dims } = variable;
     const validDims = dims.filter((dim) => dim > 0);
@@ -121,16 +139,14 @@ const BlockView = ({
     const validDims = dims.filter((dim) => dim > 0);
     return validDims.length === 0 || validDims.length > 3;
   });
-  console.log('nonTensorVariables', nonTensorVariables);
 
   return (
     <Box>
-      <Button onClick={handleBackClick} variant="contained" sx={{ mb: 2 }}>
+      <Button onClick={() => setCurrBlock(null)} variant="contained" sx={{ mb: 2 }}>
         Back
       </Button>
       <Typography variant="h6">
-        Block View for Block{' '}
-        {currBlock ? `${currBlock.x},${currBlock.y},${currBlock.z}` : ''}
+        Block View for Block {currBlock ? `${currBlock.x},${currBlock.y},${currBlock.z}` : ''}
       </Typography>
 
       <Box sx={{ mt: 2, mb: 2, p: 2, border: '1px solid #ccc', borderRadius: 2 }}>
@@ -152,12 +168,36 @@ const BlockView = ({
               </Box>
             )}
 
+            {tensorVariables.length > 0 && (
+              <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={handleResetView}
+                  sx={{ mr: 2 }}
+                >
+                  Reset View
+                </Button>
+                {tensorVariables.map(([key], index) => (
+                  <Button
+                    key={key}
+                    variant="outlined"
+                    size="small"
+                    onClick={() => handleFocusTensor(index)}
+                  >
+                    Focus {key}
+                  </Button>
+                ))}
+              </Box>
+            )}
+
             {tensorVariables.length > 0 ? (
               <Suspense fallback={<CircularProgress />}>
                 <Box sx={{ height: '700px', width: '100%', mb: 2, position: 'relative' }}>
-                <TensorsVisualization 
+                  <TensorsVisualization 
                     tensorVariables={tensorVariables}
                     setHoveredInfo={setHoveredInfo}
+                    onCameraControlsReady={setCameraControls}
                   />
                   {hoveredInfo && (
                     <Box
@@ -172,7 +212,7 @@ const BlockView = ({
                         zIndex: 1000,
                       }}
                     >
-                      <Typography variant="body2">
+                      <Typography variant="body2" sx={{ color: 'white' }}>
                         <strong>{hoveredInfo.varName}</strong> [{hoveredInfo.indices.join(',')}]: {hoveredInfo.value}
                       </Typography>
                     </Box>

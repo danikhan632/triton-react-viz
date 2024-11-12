@@ -266,13 +266,37 @@ const TensorMesh = React.memo(({ value, dims, varName, highlightedIndices, setHo
 });
 
 
-
-// CustomCameraControls Component with Arrow Keys for Rotation
-const CustomCameraControls = () => {
+const CustomCameraControls = ({ onCameraReady }) => {
   const { camera, gl } = useThree();
   const cameraRotation = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+  const initialPosition = useRef(camera.position.clone());
 
   useEffect(() => {
+    if (onCameraReady) {
+      onCameraReady({
+        focusOnPosition: (position) => {
+          // Reset rotation
+          cameraRotation.current.set(0, 0, 0, 'YXZ');
+          camera.setRotationFromEuler(cameraRotation.current);
+          
+          // Move camera to focus position
+          camera.position.set(
+            position[0],
+            position[1] + 20,
+            position[2] + 100
+          );
+          camera.lookAt(position[0], position[1], position[2]);
+          camera.updateProjectionMatrix();
+        },
+        resetView: () => {
+          camera.position.copy(initialPosition.current);
+          cameraRotation.current.set(0, 0, 0, 'YXZ');
+          camera.setRotationFromEuler(cameraRotation.current);
+          camera.updateProjectionMatrix();
+        }
+      });
+    }
+
     const canvas = gl.domElement;
     if (!canvas) return;
 
@@ -337,22 +361,14 @@ const CustomCameraControls = () => {
       camera.updateProjectionMatrix();
     };
 
-    const addListener = (element, event, handler) => {
-      if (element) element.addEventListener(event, handler);
-    };
-
-    addListener(window, 'keydown', handleKeyDown);
-    addListener(canvas, 'wheel', handleWheel);
+    window.addEventListener('keydown', handleKeyDown);
+    canvas.addEventListener('wheel', handleWheel);
 
     return () => {
-      const removeListener = (element, event, handler) => {
-        if (element) element.removeEventListener(event, handler);
-      };
-
-      removeListener(window, 'keydown', handleKeyDown);
-      removeListener(canvas, 'wheel', handleWheel);
+      window.removeEventListener('keydown', handleKeyDown);
+      canvas.removeEventListener('wheel', handleWheel);
     };
-  }, [camera, gl]);
+  }, [camera, gl, onCameraReady]);
 
   useFrame(() => {
     camera.updateProjectionMatrix();
@@ -361,12 +377,18 @@ const CustomCameraControls = () => {
   return null;
 };
 
-// TensorsVisualization Component
-const TensorsVisualization = React.memo(({ tensorVariables, setHoveredInfo }) => {
+// TensorMesh component stays the same...
+
+const TensorsVisualization = React.memo(({ tensorVariables, setHoveredInfo, onCameraControlsReady }) => {
   const spacing = 50;
   const numTensors = tensorVariables.length;
   const totalWidth = (numTensors - 1) * spacing;
-  console.log('Tensors:', tensorVariables);
+  
+  const handleCameraReady = (controls) => {
+    if (onCameraControlsReady) {
+      onCameraControlsReady(controls);
+    }
+  };
 
   return (
     <Box sx={{ position: 'relative', height: '700px', width: '100%' }}>
@@ -376,9 +398,8 @@ const TensorsVisualization = React.memo(({ tensorVariables, setHoveredInfo }) =>
       >
         <ambientLight />
         <pointLight position={[10, 10, 10]} />
-        <CustomCameraControls />
+        <CustomCameraControls onCameraReady={handleCameraReady} />
         <group position={[-totalWidth / 2, 0, 0]}>
- 
           {tensorVariables.map(([key, variable], index) => {
             const { value, dims, highlighted_indices } = variable;
             const validDims = dims.filter((dim) => dim > 0);
@@ -395,26 +416,20 @@ const TensorsVisualization = React.memo(({ tensorVariables, setHoveredInfo }) =>
               />
             );
           })}
-
         </group>
       </Canvas>
     </Box>
   );
 });
 
-TensorMesh.propTypes = {
-  value: PropTypes.any.isRequired,
-  dims: PropTypes.array.isRequired,
-  varName: PropTypes.string.isRequired,
-  highlightedIndices: PropTypes.arrayOf(PropTypes.array),
-  setHoveredInfo: PropTypes.func.isRequired,
-  position: PropTypes.arrayOf(PropTypes.number).isRequired,
+CustomCameraControls.propTypes = {
+  onCameraReady: PropTypes.func,
 };
-
 
 TensorsVisualization.propTypes = {
   tensorVariables: PropTypes.arrayOf(PropTypes.array).isRequired,
   setHoveredInfo: PropTypes.func.isRequired,
+  onCameraControlsReady: PropTypes.func,
 };
 
 export { fetchAndLogBlockData, TensorsVisualization };
