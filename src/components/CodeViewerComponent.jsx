@@ -75,10 +75,11 @@ const CodeViewerComponent = ({
   // Handle keyboard navigation using up and down arrow keys
   useEffect(() => {
     const handleKeyDown = (event) => {
-      if (event.key === 'ArrowDown') {
+
+      if (event.key === '.') {
         event.preventDefault();
         handleNextLine();
-      } else if (event.key === 'ArrowUp') {
+      } else if (event.key === ',') {
         event.preventDefault();
         handlePrevLine();
       }
