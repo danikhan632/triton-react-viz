@@ -1,5 +1,5 @@
 import React, { useEffect, useState, startTransition, Suspense } from 'react';
-import { Box, Typography, Button, CircularProgress } from '@mui/material';
+import { Box, Typography, Button, CircularProgress, ButtonGroup } from '@mui/material';
 import PropTypes from 'prop-types';
 import { fetchAndLogBlockData, TensorsVisualization } from './visualization-components';
 
@@ -11,49 +11,132 @@ const BlockView = ({
   setProcessedData,
   processedData,
 }) => {
+  // State management
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [variables, setVariables] = useState({});
   const [hoveredInfo, setHoveredInfo] = useState(null);
   const [cameraControls, setCameraControls] = useState(null);
+  const [sliceMode, setSliceMode] = useState({});
+  const [sliceIndices, setSliceIndices] = useState({});
 
-
-  const findLineNumber = (sourceLine) => {
-    for (let i = 0; i < codeLines.length; i++) {
-      if (codeLines[i].trim() === sourceLine.trim()) {
-        return i + 1;
-      }
+  // Tensor slice controls
+  const toggleSliceMode = (varName, dims) => {
+    if (dims.length === 3) {
+      setSliceMode(prev => ({
+        ...prev,
+        [varName]: !prev[varName]
+      }));
+      // Initialize slice index if not already set
+      setSliceIndices(prev => ({
+        ...prev,
+        [varName]: prev[varName] ?? 0
+      }));
     }
-    return -1;
   };
+
+  const updateSliceIndex = (varName, increment) => {
+    setSliceIndices(prev => {
+      const currentIndex = prev[varName] ?? 0;
+      const maxIndex = variables[varName]?.dims[2] - 1 ?? 0;
+      return {
+        ...prev,
+        [varName]: increment 
+          ? Math.min(currentIndex + 1, maxIndex)
+          : Math.max(currentIndex - 1, 0)
+      };
+    });
+  };
+
+  // Line number finder
+  const findLineNumber = (sourceLine) => {
+    return codeLines.findIndex(line => line.trim() === sourceLine.trim()) + 1;
+  };
+
+  const extractDims = (shapeArray) => {
+    if (!Array.isArray(shapeArray)) return [-1, -1, -1];
+    const len = shapeArray.length;
+    if (len === 1) return [shapeArray[0], -1, -1];
+    if (len === 2) return [shapeArray[0], shapeArray[1], -1];
+    if (len >= 3) return shapeArray.slice(0, 3);
+    return [-1, -1, -1];
+  };
+  
+  const processVariable = (value) => {
+    // If it's a scalar or non-object
+    if (!value || typeof value !== 'object') {
+      return {
+        value: value,
+        dims: [-1, -1, -1],
+        highlighted_indices: [],
+        tensor_ptr: null,
+        solo_ptr: false,
+        slice_shape: null
+      };
+    }
+  
+    // Pointer-based tensor variable
+    if ('tensor_ptr' in value) {
+      const usedDims = value.shape 
+        ? extractDims(value.shape) 
+        : (value.dim ? extractDims(value.dim) : [-1, -1, -1]);
+  
+      return {
+        value: null,
+        dims: usedDims,
+        highlighted_indices: value.highlighted_indices || [],
+        tensor_ptr: value.tensor_ptr || null,
+        solo_ptr: !!value.solo_ptr,
+        slice_shape: value.slice_shape || null
+      };
+    }
+  
+    // Standard tensor with data
+    if ('data' in value) {
+      const usedDims = value.shape ? extractDims(value.shape) : (value.dims || [-1, -1, -1]);
+      return {
+        value: value.data,
+        dims: usedDims,
+        highlighted_indices: value.highlighted_indices || [],
+        tensor_ptr: null,
+        solo_ptr: false,
+        slice_shape: null
+      };
+    }
+  
+    // Default case: scalar or unknown object
+    return {
+      value: value,
+      dims: [-1, -1, -1],
+      highlighted_indices: [],
+      tensor_ptr: null,
+      solo_ptr: false,
+      slice_shape: null
+    };
+  };
+  
 
   const updateVariables = (data) => {
-    if (data?.results) {
-      const newVariables = {};
-      
-        data.results.forEach((result) => {
-          try {
-          const resultLine = findLineNumber(result.source_line);
-          if (resultLine <= currLine && result.changed_vars) {
-            Object.entries(result.changed_vars).forEach(([key, value]) => {
-              newVariables[key] = {
-                value: typeof value === 'object' ? value.data : value,
-                dims: value.dims || [-1, -1, -1],
-                highlighted_indices: value.highlighted_indices || [],
-              };
-            });
-          }
-        } catch (error) {
-          console.error('Error updating variables:', error);
-          console.error(result);
-        }
-        });
-        setVariables(newVariables);
-  
-    }
-  };
-  
+    if (!data?.results) return;
 
+    const newVariables = {};
+    data.results.forEach(result => {
+      try {
+        const resultLine = findLineNumber(result.source_line);
+        if (resultLine <= currLine && result.changed_vars) {
+          Object.entries(result.changed_vars).forEach(([key, value]) => {
+            console.log(value);
+            newVariables[key] = processVariable(value);
+          });
+        }
+      } catch (error) {
+        console.error('Error processing result:', error, result);
+      }
+    });
+    setVariables(newVariables);
+  };
+
+  // Data fetching
   useEffect(() => {
     if (!currBlock) {
       startTransition(() => {
@@ -81,70 +164,115 @@ const BlockView = ({
           });
         }
       } catch (err) {
-        if (isMounted) {
-          setError('Failed to fetch block data.');
-        }
+        if (isMounted) setError('Failed to fetch block data.');
       } finally {
-        if (isMounted) {
-          setIsLoading(false);
-        }
+        if (isMounted) setIsLoading(false);
       }
     };
 
     fetchData();
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [currBlock, setProcessedData]);
 
+  // Update variables when line changes
   useEffect(() => {
     if (processedData) {
-      startTransition(() => {
-        updateVariables(processedData);
-      });
+      startTransition(() => updateVariables(processedData));
     }
   }, [currLine, processedData]);
 
-  const handleBackClick = () => {
-    startTransition(() => {
-      setCurrBlock(null);
-      setProcessedData(null);
+  // Camera controls
+  const handleFocusTensor = (index) => {
+    if (!cameraControls) return;
+    const spacing = 50;
+    const numTensors = tensorVariables.length;
+    const totalWidth = (numTensors - 1) * spacing;
+    const position = [-totalWidth / 2 + index * spacing, -9, -50];
+    cameraControls.focusOnPosition(position);
+  };
+
+  // Filter variables
+  const filterTensorVariables = (vars) => {
+
+    return Object.entries(vars).filter(([, variable]) => {
+      const validDims = variable.dims.filter(dim => dim > 0);
+      return validDims.length >= 1 && validDims.length <= 3;
     });
   };
 
-  const handleFocusTensor = (index) => {
-    if (cameraControls) {
-      const spacing = 50;
-      const numTensors = tensorVariables.length;
-      const totalWidth = (numTensors - 1) * spacing;
-      const position = [-totalWidth / 2 + index * spacing, -9, -50];
-      cameraControls.focusOnPosition(position);
-    }
+  const filterNonTensorVariables = (vars) => {
+    return Object.entries(vars).filter(([, variable]) => {
+      const validDims = variable.dims.filter(dim => dim > 0);
+      console.log(validDims);
+      return validDims.length === 0 || validDims.length > 3;
+    });
   };
 
-  const handleResetView = () => {
-    if (cameraControls) {
-      cameraControls.resetView();
-    }
+  const tensorVariables = filterTensorVariables(variables);
+  const nonTensorVariables = filterNonTensorVariables(variables);
+
+  // Render tensor controls
+  const renderTensorControls = (key, variable, index) => {
+    const is3DTensor = variable.dims.length === 3;
+    const isSliceModeActive = sliceMode[key];
+    const currentSliceIndex = sliceIndices[key] ?? 0;
+    const maxSliceIndex = variable.dims[2] - 1;
+
+    return (
+      <Box key={key} sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', my: 1 }}>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => handleFocusTensor(index)}
+        >
+          Focus {key}
+        </Button>
+        
+        {is3DTensor && (
+          <>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => toggleSliceMode(key, variable.dims)}
+            >
+              {isSliceModeActive ? '3D View' : 'Slice View'}
+            </Button>
+            
+            {isSliceModeActive && (
+              <ButtonGroup size="small" variant="outlined">
+                <Button
+                  onClick={() => updateSliceIndex(key, false)}
+                  disabled={currentSliceIndex === 0}
+                >
+                  Previous
+                </Button>
+                <Button disabled>
+                  {currentSliceIndex + 1}/{maxSliceIndex + 1}
+                </Button>
+                <Button
+                  onClick={() => updateSliceIndex(key, true)}
+                  disabled={currentSliceIndex === maxSliceIndex}
+                >
+                  Next
+                </Button>
+              </ButtonGroup>
+            )}
+          </>
+        )}
+      </Box>
+    );
   };
-
-  const tensorVariables = Object.entries(variables).filter(([, variable]) => {
-    const { dims } = variable;
-    const validDims = dims.filter((dim) => dim > 0);
-    return validDims.length >= 1 && validDims.length <= 3;
-  });
-
-  const nonTensorVariables = Object.entries(variables).filter(([, variable]) => {
-    const { dims } = variable;
-    const validDims = dims.filter((dim) => dim > 0);
-    return validDims.length === 0 || validDims.length > 3;
-  });
 
   return (
     <Box>
-      <Button onClick={() => setCurrBlock(null)} variant="contained" sx={{ mb: 2 }}>
+      <Button 
+        onClick={() => setCurrBlock(null)} 
+        variant="contained" 
+        sx={{ mb: 2 }}
+      >
         Back
       </Button>
+
       <Typography variant="h6">
         Block View for Block {currBlock ? `${currBlock.x},${currBlock.y},${currBlock.z}` : ''}
       </Typography>
@@ -158,6 +286,7 @@ const BlockView = ({
           </Box>
         ) : (
           <>
+            {/* Non-tensor variables */}
             {nonTensorVariables.length > 0 && (
               <Box sx={{ mb: 2 }}>
                 {nonTensorVariables.map(([key, variable]) => (
@@ -168,29 +297,25 @@ const BlockView = ({
               </Box>
             )}
 
+            {/* Tensor controls */}
             {tensorVariables.length > 0 && (
-              <Box sx={{ mb: 2, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Box sx={{ mb: 2 }}>
                 <Button
                   variant="outlined"
                   size="small"
-                  onClick={handleResetView}
-                  sx={{ mr: 2 }}
+                  onClick={() => cameraControls?.resetView()}
+                  sx={{ mb: 2 }}
                 >
                   Reset View
                 </Button>
-                {tensorVariables.map(([key], index) => (
-                  <Button
-                    key={key}
-                    variant="outlined"
-                    size="small"
-                    onClick={() => handleFocusTensor(index)}
-                  >
-                    Focus {key}
-                  </Button>
-                ))}
+                
+                {tensorVariables.map(([key, variable], index) => 
+                  renderTensorControls(key, variable, index)
+                )}
               </Box>
             )}
 
+            {/* Tensor visualization */}
             {tensorVariables.length > 0 ? (
               <Suspense fallback={<CircularProgress />}>
                 <Box sx={{ height: '700px', width: '100%', mb: 2, position: 'relative' }}>
@@ -198,7 +323,11 @@ const BlockView = ({
                     tensorVariables={tensorVariables}
                     setHoveredInfo={setHoveredInfo}
                     onCameraControlsReady={setCameraControls}
+                    sliceMode={sliceMode}
+                    sliceIndices={sliceIndices}
                   />
+                  
+                  {/* Hover info overlay */}
                   {hoveredInfo && (
                     <Box
                       sx={{
@@ -207,12 +336,13 @@ const BlockView = ({
                         right: '10px',
                         padding: '10px',
                         backgroundColor: 'rgba(0,0,0,0.9)',
+                        color: 'white',
                         borderRadius: '8px',
                         boxShadow: '0 0 10px rgba(0,0,0,0.3)',
                         zIndex: 1000,
                       }}
                     >
-                      <Typography variant="body2" sx={{ color: 'white' }}>
+                      <Typography variant="body2">
                         <strong>{hoveredInfo.varName}</strong> [{hoveredInfo.indices.join(',')}]: {hoveredInfo.value}
                       </Typography>
                     </Box>

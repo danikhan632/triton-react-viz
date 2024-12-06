@@ -78,193 +78,6 @@ const fetchAndLogBlockData = async (gridX, gridY, gridZ) => {
 
 // TensorMesh Component
 
-const TensorMesh = React.memo(({ value, dims, varName, highlightedIndices, setHoveredInfo, position }) => {
-  let rows = 1;
-  let cols = 1;
-  let depths = 1;
-  let boxes = [];
-  const varColor = getVariableColor(varName);
-
-  // Variables to hold matching indices and tensor dimensions
-  let matchingSet = new Set();
-  let validDims = [];
-
-  // Check if value has highlighted_coords and shape
-  if (value && value.highlighted_coords && value.shape) {
-    const shape = value.shape;
-    validDims = shape.filter((dim) => dim > 0);
-
-    // Set tensor dimensions based on shape
-    if (validDims.length === 1) {
-      cols = validDims[0];
-    } else if (validDims.length === 2) {
-      [rows, cols] = validDims;
-    } else if (validDims.length === 3) {
-      [rows, cols, depths] = validDims;
-    }
-
-    // Create a set of matching indices for quick lookup
-    matchingSet = new Set(
-      value.highlighted_coords.map(indices => indices.join(','))
-    );
-
-    // Generate boxes with special coloring logic
-    for (let i = 0; i < rows; i++) {
-      for (let j = 0; j < cols; j++) {
-        for (let k = 0; k < depths; k++) {
-          const indexKey = [i, j, k].slice(0, validDims.length).join(',');
-          const isMatching = matchingSet.has(indexKey);
-
-          boxes.push(
-            <mesh
-              key={`${varName}-${i}-${j}-${k}`}
-              position={[
-                j - cols / 2,
-                -i + rows / 2,
-                k - depths / 2,
-              ]}
-              onPointerOver={(e) => {
-                e.stopPropagation();
-                startTransition(() => {
-                  setHoveredInfo({
-                    varName,
-                    indices: [i, j, k],
-                    value: isMatching ? 'Matched' : 'Not Matched'
-                  });
-                });
-              }}
-              onPointerOut={(e) => {
-                e.stopPropagation();
-                startTransition(() => {
-                  setHoveredInfo(null);
-                });
-              }}
-            >
-              <boxGeometry args={[0.9, 0.9, 0.9]} />
-              <meshStandardMaterial color={isMatching ? `rgb(${varColor.r}, ${varColor.g}, ${varColor.b})` : 'lightgrey'} />
-              <lineSegments>
-                <edgesGeometry attach="geometry" args={[new THREE.BoxGeometry(0.9, 0.9, 0.9)]} />
-                <lineBasicMaterial attach="material" color="black" />
-              </lineSegments>
-            </mesh>
-          );
-        }
-      }
-    }
-  } else {
-    // Existing logic for tensors without highlighted_coords and shape
-    // Ensure valid dimensions
-    validDims = dims.filter((dim) => dim > 0);
-    if (validDims.length === 1) {
-      cols = validDims[0];
-    } else if (validDims.length === 2) {
-      [rows, cols] = validDims;
-    } else if (validDims.length === 3) {
-      [rows, cols, depths] = validDims;
-    }
-
-    const ensureValidData = (value) => {
-      if (value == null) return [];
-      if (Array.isArray(value)) {
-        return value.flat(Infinity).filter(val => val != null);
-      }
-      return [value];
-    };
-
-    const tensorData = ensureValidData(value);
-
-    if (tensorData.length === 0) {
-      return (
-        <group position={position}>
-          <Text
-            position={[0, 2, 0]}
-            fontSize={1}
-            color="black"
-            anchorX="center"
-            anchorY="middle"
-          >
-            {varName} (No Data)
-          </Text>
-        </group>
-      );
-    }
-
-    const minVal = Math.min(...tensorData);
-    const maxVal = Math.max(...tensorData);
-
-    // Generate boxes with original coloring logic
-    for (let i = 0; i < rows; i++) {
-      for (let j = 0; j < cols; j++) {
-        for (let k = 0; k < depths; k++) {
-          const idx = i * cols * depths + j * depths + k;
-          const val = tensorData[idx] ?? 0;
-          const intensity = maxVal === minVal ? 0.5 : (val - minVal) / (maxVal - minVal || 1);
-
-          const interpolateColor = (intensity) => {
-            const r = Math.round(255 - (255 - varColor.r) * intensity);
-            const g = Math.round(255 - (255 - varColor.g) * intensity);
-            const b = Math.round(255 - (255 - varColor.b) * intensity);
-            return `rgb(${r}, ${g}, ${b})`;
-          };
-
-          // Check if the current element should be highlighted
-          const indexKey = [i, j, k].slice(0, validDims.length).join(',');
-          const isHighlighted = highlightedIndices?.some(indices => indices.join(',') === indexKey);
-
-          boxes.push(
-            <mesh
-              key={`${varName}-${i}-${j}-${k}`}
-              position={[
-                j - cols / 2,
-                -i + rows / 2,
-                k - depths / 2,
-              ]}
-              onPointerOver={(e) => {
-                e.stopPropagation();
-                startTransition(() => {
-                  setHoveredInfo({
-                    varName,
-                    indices: [i, j, k],
-                    value: tensorData[idx] ?? 'N/A'
-                  });
-                });
-              }}
-              onPointerOut={(e) => {
-                e.stopPropagation();
-                startTransition(() => {
-                  setHoveredInfo(null);
-                });
-              }}
-            >
-              <boxGeometry args={[0.9, 0.9, 0.9]} />
-              <meshStandardMaterial color={isHighlighted ? 'yellow' : interpolateColor(intensity)} />
-              <lineSegments>
-                <edgesGeometry attach="geometry" args={[new THREE.BoxGeometry(0.9, 0.9, 0.9)]} />
-                <lineBasicMaterial attach="material" color="black" />
-              </lineSegments>
-            </mesh>
-          );
-        }
-      }
-    }
-  }
-
-  return (
-    <group position={position}>
-      <Text
-        position={[0, rows / 2 + 2, 0]}
-        fontSize={1}
-        color={`rgb(${varColor.r}, ${varColor.g}, ${varColor.b})`}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {varName}
-      </Text>
-      {boxes}
-    </group>
-  );
-});
-
 
 const CustomCameraControls = ({ onCameraReady }) => {
   const { camera, gl } = useThree();
@@ -377,50 +190,178 @@ const CustomCameraControls = ({ onCameraReady }) => {
   return null;
 };
 
-// TensorMesh component stays the same...
+const TensorMesh = React.memo(({ value, dims, varName, highlightedIndices, setHoveredInfo, position, sliceMode = false, sliceIndex = 0 }) => {
+  let rows = 1;
+  let cols = 1;
+  let depths = 1;
+  let boxes = [];
+  const varColor = getVariableColor(varName);
 
-const TensorsVisualization = React.memo(({ tensorVariables, setHoveredInfo, onCameraControlsReady }) => {
+  // Determine dimensions based on the tensor shape
+  if (value && Array.isArray(value)) {
+    const validDims = dims.filter((dim) => dim > 0);
+    if (validDims.length === 1) {
+      cols = validDims[0];
+    } else if (validDims.length === 2) {
+      [rows, cols] = validDims;
+    } else if (validDims.length === 3) {
+      [rows, cols, depths] = validDims;
+    }
+
+    // Flatten the tensor data for easier indexing
+    const tensorData = value.flat(Infinity).filter(val => val != null);
+    const minVal = Math.min(...tensorData);
+    const maxVal = Math.max(...tensorData);
+
+    // Generate 3D boxes
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        for (let k = 0; k < depths; k++) {
+          const idx = i * cols * depths + j * depths + k;
+          const val = tensorData[idx] ?? 0;
+
+          // Compute intensity for coloring
+          const intensity = maxVal === minVal ? 0.5 : (val - minVal) / (maxVal - minVal || 1);
+
+          boxes.push(
+            <mesh
+              key={`${varName}-${i}-${j}-${k}`}
+              position={[
+                j - cols / 2,
+                -i + rows / 2,
+                k - depths / 2,
+              ]}
+              onPointerOver={(e) => {
+                e.stopPropagation();
+                // Change outline (edges) color to yellow
+                try {
+                  e.object.parent.traverse((child) => {
+                    if (child.isLineSegments) {
+                      child.material.color.set('yellow');
+                    }
+                  });
+                } catch (error) {
+                  console.error("Failed to highlight cube edges on hover:", error);
+                }
+
+                // Update hovered information
+                startTransition(() => {
+                  setHoveredInfo({
+                    varName,
+                    indices: [i, j, k],
+                    value: tensorData[idx] ?? 'N/A',
+                  });
+                });
+              }}
+              onPointerOut={(e) => {
+                e.stopPropagation();
+                // Revert outline (edges) color to black
+                try {
+                  e.object.parent.traverse((child) => {
+                    if (child.isLineSegments) {
+                      child.material.color.set('black');
+                    }
+                  });
+                } catch (error) {
+                  console.error("Failed to reset cube edges on pointer out:", error);
+                }
+
+                // Clear hovered information
+                startTransition(() => {
+                  setHoveredInfo(null);
+                });
+              }}
+            >
+              {/* Cube geometry */}
+              <boxGeometry args={[0.9, 0.9, 0.9]} />
+
+              {/* Cube material based on intensity */}
+              <meshStandardMaterial color={getColorForValue(varColor, intensity)} />
+
+              {/* Cube outline (edges) */}
+              <lineSegments>
+                <edgesGeometry attach="geometry" args={[new THREE.BoxGeometry(0.9, 0.9, 0.9)]} />
+                <lineBasicMaterial attach="material" color="black" />
+              </lineSegments>
+            </mesh>
+          );
+        }
+      }
+    }
+  }
+
+  return (
+    <group position={position}>
+      {/* Tensor label */}
+      <Text
+        position={[0, rows / 2 + 2, 0]}
+        fontSize={1}
+        color={`rgb(${varColor.r}, ${varColor.g}, ${varColor.b})`}
+        anchorX="center"
+        anchorY="middle"
+      >
+        {varName} {sliceMode ? `(Slice ${sliceIndex + 1}/${depths})` : ''}
+      </Text>
+      {/* Render all generated boxes */}
+      {boxes}
+    </group>
+  );
+});
+
+// Update TensorsVisualization to pass slice information
+const TensorsVisualization = React.memo(({ 
+  tensorVariables, 
+  setHoveredInfo, 
+  onCameraControlsReady,
+  sliceMode,
+  sliceIndices
+}) => {
   const spacing = 50;
   const numTensors = tensorVariables.length;
   const totalWidth = (numTensors - 1) * spacing;
-  
-  const handleCameraReady = (controls) => {
-    if (onCameraControlsReady) {
-      onCameraControlsReady(controls);
-    }
-  };
 
   return (
-    <Box sx={{ position: 'relative', height: '700px', width: '100%' }}>
-      <Canvas
-        style={{ height: '100%', width: '100%' }}
-        camera={{ position: [0, 0, 100], fov: 45 }}
-      >
-        <ambientLight />
-        <pointLight position={[10, 10, 10]} />
-        <CustomCameraControls onCameraReady={handleCameraReady} />
-        <group position={[-totalWidth / 2, 0, 0]}>
-          {tensorVariables.map(([key, variable], index) => {
-            const { value, dims, highlighted_indices } = variable;
-            const validDims = dims.filter((dim) => dim > 0);
-            const tensorPosition = [index * spacing, 0, 0];
-            return (
-              <TensorMesh
-                key={key}
-                value={value}
-                dims={validDims}
-                varName={key}
-                highlightedIndices={highlighted_indices}
-                setHoveredInfo={setHoveredInfo}
-                position={tensorPosition}
-              />
-            );
-          })}
-        </group>
-      </Canvas>
-    </Box>
+    <Canvas
+      style={{ height: '100%', width: '100%' }}
+      camera={{ position: [0, 0, 100], fov: 45 }}
+    >
+      <ambientLight />
+      <pointLight position={[10, 10, 10]} />
+      <CustomCameraControls onCameraReady={onCameraControlsReady} />
+      <group position={[-totalWidth / 2, 0, 0]}>
+        {tensorVariables.map(([key, variable], index) => {
+          console.log('foo');
+          const { value, dims, highlighted_indices } = variable;
+          const validDims = dims.filter((dim) => dim > 0);
+          const tensorPosition = [index * spacing, 0, 0];
+          
+          return (
+            <TensorMesh
+              key={key}
+              value={value}
+              dims={validDims}
+              varName={key}
+              highlightedIndices={highlighted_indices}
+              setHoveredInfo={setHoveredInfo}
+              position={tensorPosition}
+              sliceMode={sliceMode[key]}
+              sliceIndex={sliceIndices[key] || 0}
+            />
+          );
+        })}
+      </group>
+    </Canvas>
   );
 });
+
+// Helper function to get color based on intensity
+const getColorForValue = (baseColor, intensity) => {
+  const r = Math.round(255 - (255 - baseColor.r) * intensity);
+  const g = Math.round(255 - (255 - baseColor.g) * intensity);
+  const b = Math.round(255 - (255 - baseColor.b) * intensity);
+  return `rgb(${r}, ${g}, ${b})`;
+};
+
 
 CustomCameraControls.propTypes = {
   onCameraReady: PropTypes.func,

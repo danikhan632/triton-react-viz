@@ -1,124 +1,380 @@
-// App.jsx
-import React, { useState, useEffect } from 'react';
-import { Box, Typography } from '@mui/material';
-import GridViewComponent from './components/GridViewComponent';
-import CodeViewerComponent from './components/CodeViewerComponent';
-import BlockView from './components/BlockView';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+File: visualization-components.js
+import React, { useEffect, useRef, startTransition } from 'react';
+import { Box } from '@mui/material';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import PropTypes from 'prop-types';
+import { Text } from '@react-three/drei';
+import * as THREE from 'three';
 
-const darkTheme = createTheme({
-  palette: {
-    mode: 'dark',
-  },
-});
+// Store colors for variables
+const variableColorMap = new Map();
 
-const App = () => {
-  const [currBlock, setCurrBlock] = useState(null); // Current selected block
-  const [currLine, setCurrLine] = useState(null);   // Current highlighted line
-  const [codeLines, setCodeLines] = useState([]);   // Source code lines
-  const [loadingCode, setLoadingCode] = useState(true);
-  const [errorCode, setErrorCode] = useState(null);
+// Generate a random color for a variable
+const getVariableColor = (varName) => {
+  if (variableColorMap.has(varName)) {
+    return variableColorMap.get(varName);
+  }
 
-  // Fetch the source code when the app mounts
-  useEffect(() => {
-    const fetchCode = async () => {
-      try {
-        const response = await fetch('/get_src', {
-          method: 'GET',
-        });
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const text = await response.text();
-        setCodeLines(text.split('\n'));
-        setLoadingCode(false);
-      } catch (error) {
-        console.error('Error fetching source code:', error);
-        setErrorCode('Failed to load source code.');
-        setLoadingCode(false);
-      }
-    };
+  // Generate a new color using HSL for better distribution
+  const hue = Math.random();
+  const saturation = 0.7 + Math.random() * 0.3; // 0.7-1.0
+  const lightness = 0.4 + Math.random() * 0.2;  // 0.4-0.6
 
-    fetchCode();
-  }, []);
+  // Convert HSL to RGB
+  const h = hue;
+  const s = saturation;
+  const l = lightness;
+  
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q - p) * 6 * t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+    return p;
+  };
 
-  return (
-    <ThemeProvider theme={darkTheme}>
-      <Box
-        sx={{
-          display: 'flex',
-          flexDirection: 'column',
-          height: '100vh',
-          bgcolor: 'grey.900',
-          color: 'white',
-        }}
-      >
-        {/* Header */}
-        <Box sx={{ bgcolor: 'grey.800', p: 2 }}>
-          <Typography variant="h4" align="center">
-            GPU Profiling Tool
-          </Typography>
-        </Box>
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  
+  const color = {
+    r: Math.round(hue2rgb(p, q, h + 1/3) * 255),
+    g: Math.round(hue2rgb(p, q, h) * 255),
+    b: Math.round(hue2rgb(p, q, h - 1/3) * 255)
+  };
 
-        {/* Main Content */}
-        <Box
-          sx={{
-            display: 'flex',
-            flexGrow: 1,
-            minHeight: 0,
-          }}
-        >
-          {/* Left Side: GridView or BlockView */}
-          <Box
-            sx={{
-              flex: '0 0 60%',
-              p: 2,
-              overflow: 'auto',
-              height: '100%',
-            }}
-          >
-            {currBlock === null ? (
-              <GridViewComponent setCurrBlock={setCurrBlock} />
-            ) : (
-              <BlockView
-                currBlock={currBlock}
-                setCurrBlock={setCurrBlock}
-                currLine={currLine}
-                codeLines={codeLines}
-              />
-            )}
-          </Box>
-
-          {/* Right Side: CodeViewer */}
-          <Box
-            sx={{
-              flex: '0 0 40%',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'flex-start',
-              bgcolor: 'grey.800',
-              height: '100%',
-              overflow: 'auto',
-            }}
-          >
-            <CodeViewerComponent
-              currBlock={currBlock}
-              currLine={currLine}
-              setCurrLine={setCurrLine}
-              codeLines={codeLines}
-              loadingCode={loadingCode}
-              errorCode={errorCode}
-            />
-          </Box>
-        </Box>
-      </Box>
-    </ThemeProvider>
-  );
+  variableColorMap.set(varName, color);
+  return color;
 };
 
-export default App;
+// Utility function to fetch block data
+const fetchAndLogBlockData = async (gridX, gridY, gridZ) => {
+  console.log('Fetching data for block:', gridX, gridY, gridZ);
+  try {
+    const response = await fetch('http://73.106.153.51:5002/process_blocks', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        x: gridX,
+        y: gridY,
+        z: gridZ,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();  // Await the JSON response
+    console.log('Received data:', data); // Log the data
+    return data;
+  } catch (error) {
+    console.error('Error fetching block data:', error);
+    throw error;
+  }
+};
 
 
+// TensorMesh Component
+
+
+const CustomCameraControls = ({ onCameraReady }) => {
+  const { camera, gl } = useThree();
+  const cameraRotation = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
+  const initialPosition = useRef(camera.position.clone());
+
+  useEffect(() => {
+    if (onCameraReady) {
+      onCameraReady({
+        focusOnPosition: (position) => {
+          // Reset rotation
+          cameraRotation.current.set(0, 0, 0, 'YXZ');
+          camera.setRotationFromEuler(cameraRotation.current);
+          
+          // Move camera to focus position
+          camera.position.set(
+            position[0],
+            position[1] + 20,
+            position[2] + 100
+          );
+          camera.lookAt(position[0], position[1], position[2]);
+          camera.updateProjectionMatrix();
+        },
+        resetView: () => {
+          camera.position.copy(initialPosition.current);
+          cameraRotation.current.set(0, 0, 0, 'YXZ');
+          camera.setRotationFromEuler(cameraRotation.current);
+          camera.updateProjectionMatrix();
+        }
+      });
+    }
+
+    const canvas = gl.domElement;
+    if (!canvas) return;
+
+    const handleKeyDown = (event) => {
+      const PAN_SPEED = 1;
+      const ZOOM_SPEED = 2;
+      const ROTATE_SPEED = 0.05;
+
+      switch (event.key) {
+        case 'ArrowUp':
+          cameraRotation.current.x -= ROTATE_SPEED;
+          cameraRotation.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotation.current.x));
+          camera.setRotationFromEuler(cameraRotation.current);
+          break;
+        case 'ArrowDown':
+          cameraRotation.current.x += ROTATE_SPEED;
+          cameraRotation.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, cameraRotation.current.x));
+          camera.setRotationFromEuler(cameraRotation.current);
+          break;
+        case 'ArrowLeft':
+          cameraRotation.current.y -= ROTATE_SPEED;
+          camera.setRotationFromEuler(cameraRotation.current);
+          break;
+        case 'ArrowRight':
+          cameraRotation.current.y += ROTATE_SPEED;
+          camera.setRotationFromEuler(cameraRotation.current);
+          break;
+        case 'w':
+        case 'W':
+          camera.position.y += PAN_SPEED;
+          break;
+        case 's':
+        case 'S':
+          camera.position.y -= PAN_SPEED;
+          break;
+        case 'a':
+        case 'A':
+          camera.position.x -= PAN_SPEED;
+          break;
+        case 'd':
+        case 'D':
+          camera.position.x += PAN_SPEED;
+          break;
+        case 'o':
+        case 'O':
+          camera.position.z -= ZOOM_SPEED;
+          break;
+        case 'p':
+        case 'P':
+          camera.position.z += ZOOM_SPEED;
+          break;
+        default:
+          break;
+      }
+      camera.updateProjectionMatrix();
+    };
+
+    const handleWheel = (event) => {
+      const ZOOM_SPEED = 0.1;
+      camera.position.z += event.deltaY * ZOOM_SPEED;
+      camera.position.z = Math.max(20, Math.min(200, camera.position.z));
+      camera.updateProjectionMatrix();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    canvas.addEventListener('wheel', handleWheel);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      canvas.removeEventListener('wheel', handleWheel);
+    };
+  }, [camera, gl, onCameraReady]);
+
+  useFrame(() => {
+    camera.updateProjectionMatrix();
+  });
+
+  return null;
+};
+
+const TensorMesh = React.memo(({ value, dims, varName, highlightedIndices, setHoveredInfo, position, sliceMode = false, sliceIndex = 0 }) => {
+  let rows = 1;
+  let cols = 1;
+  let depths = 1;
+  let boxes = [];
+  const varColor = getVariableColor(varName);
+
+  // Determine dimensions based on the tensor shape
+  if (value && Array.isArray(value)) {
+    const validDims = dims.filter((dim) => dim > 0);
+    if (validDims.length === 1) {
+      cols = validDims[0];
+    } else if (validDims.length === 2) {
+      [rows, cols] = validDims;
+    } else if (validDims.length === 3) {
+      [rows, cols, depths] = validDims;
+    }
+
+    // Flatten the tensor data for easier indexing
+    const tensorData = value.flat(Infinity).filter(val => val != null);
+    const minVal = Math.min(...tensorData);
+    const maxVal = Math.max(...tensorData);
+
+    // Generate 3D boxes
+    for (let i = 0; i < rows; i++) {
+      for (let j = 0; j < cols; j++) {
+        for (let k = 0; k < depths; k++) {
+          const idx = i * cols * depths + j * depths + k;
+          const val = tensorData[idx] ?? 0;
+
+          // Compute intensity for coloring
+          const intensity = maxVal === minVal ? 0.5 : (val - minVal) / (maxVal - minVal || 1);
+
+          boxes.push(
+            <mesh
+              key={`${varName}-${i}-${j}-${k}`}
+              position={[
+                j - cols / 2,
+                -i + rows / 2,
+                k - depths / 2,
+              ]}
+              onPointerOver={(e) => {
+                e.stopPropagation();
+                // Change outline (edges) color to yellow
+                try {
+                  e.object.parent.traverse((child) => {
+                    if (child.isLineSegments) {
+                      child.material.color.set('yellow');
+                    }
+                  });
+                } catch (error) {
+                  console.error("Failed to highlight cube edges on hover:", error);
+                }
+
+                // Update hovered information
+                startTransition(() => {
+                  setHoveredInfo({
+                    varName,
+                    indices: [i, j, k],
+                    value: tensorData[idx] ?? 'N/A',
+                  });
+                });
+              }}
+              onPointerOut={(e) => {
+                e.stopPropagation();
+                // Revert outline (edges) color to black
+                try {
+                  e.object.parent.traverse((child) => {
+                    if (child.isLineSegments) {
+                      child.material.color.set('black');
+                    }
+                  });
+                } catch (error) {
+                  console.error("Failed to reset cube edges on pointer out:", error);
+                }
+
+                // Clear hovered information
+                startTransition(() => {
+                  setHoveredInfo(null);
+                });
+              }}
+            >
+              {/* Cube geometry */}
+              <boxGeometry args={[0.9, 0.9, 0.9]} />
+
+              {/* Cube material based on intensity */}
+              <meshStandardMaterial color={getColorForValue(varColor, intensity)} />
+
+              {/* Cube outline (edges) */}
+              <lineSegments>
+                <edgesGeometry attach="geometry" args={[new THREE.BoxGeometry(0.9, 0.9, 0.9)]} />
+                <lineBasicMaterial attach="material" color="black" />
+              </lineSegments>
+            </mesh>
+          );
+        }
+      }
+    }
+  }
+
+  return (
+    <group position={position}>
+      {/* Tensor label */}
+      <Text
+        position={[0, rows / 2 + 2, 0]}
+        fontSize={1}
+        color={`rgb(${varColor.r}, ${varColor.g}, ${varColor.b})`}
+        anchorX="center"
+        anchorY="middle"
+      >
+        {varName} {sliceMode ? `(Slice ${sliceIndex + 1}/${depths})` : ''}
+      </Text>
+      {/* Render all generated boxes */}
+      {boxes}
+    </group>
+  );
+});
+
+// Update TensorsVisualization to pass slice information
+const TensorsVisualization = React.memo(({ 
+  tensorVariables, 
+  setHoveredInfo, 
+  onCameraControlsReady,
+  sliceMode,
+  sliceIndices
+}) => {
+  const spacing = 50;
+  const numTensors = tensorVariables.length;
+  const totalWidth = (numTensors - 1) * spacing;
+
+  return (
+    <Canvas
+      style={{ height: '100%', width: '100%' }}
+      camera={{ position: [0, 0, 100], fov: 45 }}
+    >
+      <ambientLight />
+      <pointLight position={[10, 10, 10]} />
+      <CustomCameraControls onCameraReady={onCameraControlsReady} />
+      <group position={[-totalWidth / 2, 0, 0]}>
+        {tensorVariables.map(([key, variable], index) => {
+          console.log('foo');
+          const { value, dims, highlighted_indices } = variable;
+          const validDims = dims.filter((dim) => dim > 0);
+          const tensorPosition = [index * spacing, 0, 0];
+          
+          return (
+            <TensorMesh
+              key={key}
+              value={value}
+              dims={validDims}
+              varName={key}
+              highlightedIndices={highlighted_indices}
+              setHoveredInfo={setHoveredInfo}
+              position={tensorPosition}
+              sliceMode={sliceMode[key]}
+              sliceIndex={sliceIndices[key] || 0}
+            />
+          );
+        })}
+      </group>
+    </Canvas>
+  );
+});
+
+// Helper function to get color based on intensity
+const getColorForValue = (baseColor, intensity) => {
+  const r = Math.round(255 - (255 - baseColor.r) * intensity);
+  const g = Math.round(255 - (255 - baseColor.g) * intensity);
+  const b = Math.round(255 - (255 - baseColor.b) * intensity);
+  return `rgb(${r}, ${g}, ${b})`;
+};
+
+
+CustomCameraControls.propTypes = {
+  onCameraReady: PropTypes.func,
+};
+
+TensorsVisualization.propTypes = {
+  tensorVariables: PropTypes.arrayOf(PropTypes.array).isRequired,
+  setHoveredInfo: PropTypes.func.isRequired,
+  onCameraControlsReady: PropTypes.func,
+};
+
+export { fetchAndLogBlockData, TensorsVisualization };
 
 File: GridBlock.jsx
 // GridBlock.jsx
@@ -154,165 +410,386 @@ export default GridBlock;
 
 
 File: BlockView.jsx
-import React, { useEffect, useState } from 'react';
-import { Box, Typography, Button, CircularProgress } from '@mui/material';
+import React, { useEffect, useState, startTransition, Suspense } from 'react';
+import { Box, Typography, Button, CircularProgress, ButtonGroup } from '@mui/material';
+import PropTypes from 'prop-types';
+import { fetchAndLogBlockData, TensorsVisualization } from './visualization-components';
 
-const fetchAndLogBlockData = async (gridX, gridY, gridZ) => {
-  console.log('Fetching data for block:', gridX, gridY, gridZ);
-
-  try {
-    const response = await fetch('/process_blocks', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        x: gridX,
-        y: gridY,
-        z: gridZ,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching block data:', error);
-    throw error;
-  }
-};
-
-const BlockView = ({ currBlock, setCurrBlock, currLine, codeLines }) => {
-  const [processedData, setProcessedData] = useState(null);
+const BlockView = ({
+  currBlock,
+  setCurrBlock,
+  currLine,
+  codeLines,
+  setProcessedData,
+  processedData,
+}) => {
+  // State management
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [variables, setVariables] = useState({});
+  const [hoveredInfo, setHoveredInfo] = useState(null);
+  const [cameraControls, setCameraControls] = useState(null);
+  const [sliceMode, setSliceMode] = useState({});
+  const [sliceIndices, setSliceIndices] = useState({});
 
+  // Tensor slice controls
+  const toggleSliceMode = (varName, dims) => {
+    if (dims.length === 3) {
+      setSliceMode(prev => ({
+        ...prev,
+        [varName]: !prev[varName]
+      }));
+      // Initialize slice index if not already set
+      setSliceIndices(prev => ({
+        ...prev,
+        [varName]: prev[varName] ?? 0
+      }));
+    }
+  };
+
+  const updateSliceIndex = (varName, increment) => {
+    setSliceIndices(prev => {
+      const currentIndex = prev[varName] ?? 0;
+      const maxIndex = variables[varName]?.dims[2] - 1 ?? 0;
+      return {
+        ...prev,
+        [varName]: increment 
+          ? Math.min(currentIndex + 1, maxIndex)
+          : Math.max(currentIndex - 1, 0)
+      };
+    });
+  };
+
+  // Line number finder
+  const findLineNumber = (sourceLine) => {
+    return codeLines.findIndex(line => line.trim() === sourceLine.trim()) + 1;
+  };
+
+  const extractDims = (shapeArray) => {
+    if (!Array.isArray(shapeArray)) return [-1, -1, -1];
+    const len = shapeArray.length;
+    if (len === 1) return [shapeArray[0], -1, -1];
+    if (len === 2) return [shapeArray[0], shapeArray[1], -1];
+    if (len >= 3) return shapeArray.slice(0, 3);
+    return [-1, -1, -1];
+  };
+  
+  const processVariable = (value) => {
+    // If it's a scalar or non-object
+    if (!value || typeof value !== 'object') {
+      return {
+        value: value,
+        dims: [-1, -1, -1],
+        highlighted_indices: [],
+        tensor_ptr: null,
+        solo_ptr: false,
+        slice_shape: null
+      };
+    }
+  
+    // Pointer-based tensor variable
+    if ('tensor_ptr' in value) {
+      const usedDims = value.shape 
+        ? extractDims(value.shape) 
+        : (value.dim ? extractDims(value.dim) : [-1, -1, -1]);
+  
+      return {
+        value: null,
+        dims: usedDims,
+        highlighted_indices: value.highlighted_indices || [],
+        tensor_ptr: value.tensor_ptr || null,
+        solo_ptr: !!value.solo_ptr,
+        slice_shape: value.slice_shape || null
+      };
+    }
+  
+    // Standard tensor with data
+    if ('data' in value) {
+      const usedDims = value.shape ? extractDims(value.shape) : (value.dims || [-1, -1, -1]);
+      return {
+        value: value.data,
+        dims: usedDims,
+        highlighted_indices: value.highlighted_indices || [],
+        tensor_ptr: null,
+        solo_ptr: false,
+        slice_shape: null
+      };
+    }
+  
+    // Default case: scalar or unknown object
+    return {
+      value: value,
+      dims: [-1, -1, -1],
+      highlighted_indices: [],
+      tensor_ptr: null,
+      solo_ptr: false,
+      slice_shape: null
+    };
+  };
+  
+
+  const updateVariables = (data) => {
+    if (!data?.results) return;
+
+    const newVariables = {};
+    data.results.forEach(result => {
+      try {
+        const resultLine = findLineNumber(result.source_line);
+        if (resultLine <= currLine && result.changed_vars) {
+          Object.entries(result.changed_vars).forEach(([key, value]) => {
+            console.log(value);
+            newVariables[key] = processVariable(value);
+          });
+        }
+      } catch (error) {
+        console.error('Error processing result:', error, result);
+      }
+    });
+    setVariables(newVariables);
+  };
+
+  // Data fetching
   useEffect(() => {
     if (!currBlock) {
-      setProcessedData(null);
-      setVariables({});
+      startTransition(() => {
+        setVariables({});
+        setProcessedData(null);
+      });
       return;
     }
+
+    let isMounted = true;
 
     const fetchData = async () => {
       setIsLoading(true);
       setError(null);
       try {
-        const data = await fetchAndLogBlockData(currBlock.x, currBlock.y, currBlock.z);
-        setProcessedData(data);
-        updateVariables(data);
+        const data = await fetchAndLogBlockData(
+          currBlock.x,
+          currBlock.y,
+          currBlock.z
+        );
+        if (isMounted) {
+          startTransition(() => {
+            setProcessedData(data);
+            updateVariables(data);
+          });
+        }
       } catch (err) {
-        setError('Failed to fetch block data.');
+        if (isMounted) setError('Failed to fetch block data.');
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     };
 
     fetchData();
-  }, [currBlock]);
+    return () => { isMounted = false; };
+  }, [currBlock, setProcessedData]);
 
+  // Update variables when line changes
   useEffect(() => {
     if (processedData) {
-      updateVariables(processedData);
+      startTransition(() => updateVariables(processedData));
     }
   }, [currLine, processedData]);
 
-  const updateVariables = (data) => {
-    if (data && data.results) {
-      const newVariables = {};
-      data.results.forEach(result => {
-        const resultLine = findLineNumber(result.source_line);
-        if (resultLine <= currLine) {
-          if (result.changed_vars) {
-            Object.entries(result.changed_vars).forEach(([key, value]) => {
-              newVariables[key] = typeof value === 'object' ? value.data : value;
-            });
-          }
-        }
-      });
-      setVariables(newVariables);
-    }
+  // Camera controls
+  const handleFocusTensor = (index) => {
+    if (!cameraControls) return;
+    const spacing = 50;
+    const numTensors = tensorVariables.length;
+    const totalWidth = (numTensors - 1) * spacing;
+    const position = [-totalWidth / 2 + index * spacing, -9, -50];
+    cameraControls.focusOnPosition(position);
   };
 
-  const handleBackClick = () => {
-    setCurrBlock(null);
-  };
+  // Filter variables
+  const filterTensorVariables = (vars) => {
 
-const findLineNumber = (sourceLine) => {
-  for (let i = 0; i < codeLines.length; i++) {
-    if (codeLines[i].trim() === sourceLine.trim()) {
-      return i + 1;
-    }
-  }
-  return -1;
-};
-  const currentResults =
-    processedData &&
-    processedData.results &&
-    processedData.results.filter((result) => {
-      const lineNum = findLineNumber(result.source_line);
-      return lineNum === currLine;
+    return Object.entries(vars).filter(([, variable]) => {
+      const validDims = variable.dims.filter(dim => dim > 0);
+      return validDims.length >= 1 && validDims.length <= 3;
     });
+  };
+
+  const filterNonTensorVariables = (vars) => {
+    return Object.entries(vars).filter(([, variable]) => {
+      const validDims = variable.dims.filter(dim => dim > 0);
+      console.log(validDims);
+      return validDims.length === 0 || validDims.length > 3;
+    });
+  };
+
+  const tensorVariables = filterTensorVariables(variables);
+  const nonTensorVariables = filterNonTensorVariables(variables);
+
+  // Render tensor controls
+  const renderTensorControls = (key, variable, index) => {
+    const is3DTensor = variable.dims.length === 3;
+    const isSliceModeActive = sliceMode[key];
+    const currentSliceIndex = sliceIndices[key] ?? 0;
+    const maxSliceIndex = variable.dims[2] - 1;
+
+    return (
+      <Box key={key} sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', my: 1 }}>
+        <Button
+          variant="outlined"
+          size="small"
+          onClick={() => handleFocusTensor(index)}
+        >
+          Focus {key}
+        </Button>
+        
+        {is3DTensor && (
+          <>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => toggleSliceMode(key, variable.dims)}
+            >
+              {isSliceModeActive ? '3D View' : 'Slice View'}
+            </Button>
+            
+            {isSliceModeActive && (
+              <ButtonGroup size="small" variant="outlined">
+                <Button
+                  onClick={() => updateSliceIndex(key, false)}
+                  disabled={currentSliceIndex === 0}
+                >
+                  Previous
+                </Button>
+                <Button disabled>
+                  {currentSliceIndex + 1}/{maxSliceIndex + 1}
+                </Button>
+                <Button
+                  onClick={() => updateSliceIndex(key, true)}
+                  disabled={currentSliceIndex === maxSliceIndex}
+                >
+                  Next
+                </Button>
+              </ButtonGroup>
+            )}
+          </>
+        )}
+      </Box>
+    );
+  };
 
   return (
     <Box>
-      <Button onClick={handleBackClick} variant="contained" sx={{ mb: 2 }}>
+      <Button 
+        onClick={() => setCurrBlock(null)} 
+        variant="contained" 
+        sx={{ mb: 2 }}
+      >
         Back
       </Button>
+
       <Typography variant="h6">
         Block View for Block {currBlock ? `${currBlock.x},${currBlock.y},${currBlock.z}` : ''}
       </Typography>
-      
-      {/* Variables Display */}
+
       <Box sx={{ mt: 2, mb: 2, p: 2, border: '1px solid #ccc', borderRadius: 2 }}>
         <Typography variant="h6">Variables (Line {currLine}):</Typography>
-        {Object.entries(variables).length > 0 ? (
-          Object.entries(variables).map(([key, value]) => (
-            <Typography key={key} variant="body2">
-              {key}: {JSON.stringify(value)}
-            </Typography>
-          ))
+
+        {isLoading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+            <CircularProgress />
+          </Box>
         ) : (
-          <Typography variant="body2">No variables defined yet.</Typography>
+          <>
+            {/* Non-tensor variables */}
+            {nonTensorVariables.length > 0 && (
+              <Box sx={{ mb: 2 }}>
+                {nonTensorVariables.map(([key, variable]) => (
+                  <Typography key={key} variant="body2">
+                    {key}: {JSON.stringify(variable.value)}
+                  </Typography>
+                ))}
+              </Box>
+            )}
+
+            {/* Tensor controls */}
+            {tensorVariables.length > 0 && (
+              <Box sx={{ mb: 2 }}>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => cameraControls?.resetView()}
+                  sx={{ mb: 2 }}
+                >
+                  Reset View
+                </Button>
+                
+                {tensorVariables.map(([key, variable], index) => 
+                  renderTensorControls(key, variable, index)
+                )}
+              </Box>
+            )}
+
+            {/* Tensor visualization */}
+            {tensorVariables.length > 0 ? (
+              <Suspense fallback={<CircularProgress />}>
+                <Box sx={{ height: '700px', width: '100%', mb: 2, position: 'relative' }}>
+                  <TensorsVisualization 
+                    tensorVariables={tensorVariables}
+                    setHoveredInfo={setHoveredInfo}
+                    onCameraControlsReady={setCameraControls}
+                    sliceMode={sliceMode}
+                    sliceIndices={sliceIndices}
+                  />
+                  
+                  {/* Hover info overlay */}
+                  {hoveredInfo && (
+                    <Box
+                      sx={{
+                        position: 'absolute',
+                        top: '10px',
+                        right: '10px',
+                        padding: '10px',
+                        backgroundColor: 'rgba(0,0,0,0.9)',
+                        color: 'white',
+                        borderRadius: '8px',
+                        boxShadow: '0 0 10px rgba(0,0,0,0.3)',
+                        zIndex: 1000,
+                      }}
+                    >
+                      <Typography variant="body2">
+                        <strong>{hoveredInfo.varName}</strong> [{hoveredInfo.indices.join(',')}]: {hoveredInfo.value}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              </Suspense>
+            ) : (
+              <Typography variant="body2">
+                No tensor variables to display.
+              </Typography>
+            )}
+
+            {tensorVariables.length === 0 && nonTensorVariables.length === 0 && (
+              <Typography variant="body2">No variables defined yet.</Typography>
+            )}
+          </>
         )}
       </Box>
 
-      {isLoading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-          <CircularProgress />
-        </Box>
-      )}
       {error && (
         <Typography variant="body2" color="error" sx={{ mt: 2 }}>
           {error}
         </Typography>
       )}
-      {!isLoading && !error && processedData && (
-        <>
-          {currentResults && currentResults.length > 0 ? (
-            <Box sx={{ mt: 2 }}>
-              {currentResults.map((result, index) => (
-                <Box key={index} sx={{ mb: 2 }}>
-                  <Typography variant="subtitle1">Result {index + 1}:</Typography>
-                  <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {JSON.stringify(result, null, 2)}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          ) : (
-            <Typography variant="body2" sx={{ mt: 2 }}>
-              No result available for the selected line.
-            </Typography>
-          )}
-        </>
-      )}
     </Box>
   );
+};
+
+BlockView.propTypes = {
+  currBlock: PropTypes.object,
+  setCurrBlock: PropTypes.func.isRequired,
+  currLine: PropTypes.number,
+  codeLines: PropTypes.array.isRequired,
+  setProcessedData: PropTypes.func.isRequired,
+  processedData: PropTypes.object,
 };
 
 export default BlockView;
@@ -326,7 +803,7 @@ import GridBlock from './GridBlock';
 // Helper function to fetch data for visualization
 const fetchVisualizationData = async () => {
   try {
-    const response = await fetch('/api/data');
+    const response = await fetch('http://73.106.153.51:5002/api/data');
     const data = await response.json();
     return data;
   } catch (error) {
@@ -499,7 +976,8 @@ export default GridViewComponent;
 
 
 File: CodeViewerComponent.jsx
-import React, { useEffect, useRef, useState } from 'react';
+// src/components/CodeViewerComponent.jsx
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -509,6 +987,8 @@ import {
   DialogContent,
   DialogActions,
 } from '@mui/material';
+import PropTypes from 'prop-types';
+import isEqual from 'lodash/isEqual'; // Import lodash's isEqual for deep comparison
 
 const CodeViewerComponent = ({
   currBlock,
@@ -517,162 +997,108 @@ const CodeViewerComponent = ({
   codeLines,
   loadingCode,
   errorCode,
+  processedData, // We now receive processedData
 }) => {
-  console.log('CodeViewerComponent rendered with props:', { currBlock, currLine, codeLines, loadingCode, errorCode });
-
   const codeContainerRef = useRef(null);
-  const [linesToHighlight, setLinesToHighlight] = useState([]);
+  const [currentHighlightIndex, setCurrentHighlightIndex] = useState(0); // Track current highlight index
+  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
 
-  // Refs to store the latest state for event handlers
-  const latestCurrLineRef = useRef(currLine);
-  const latestLinesToHighlightRef = useRef(linesToHighlight);
+  // Memoize linesToHighlight to prevent unnecessary recalculations
+  const linesToHighlight = useMemo(() => {
+    if (!processedData || !processedData.results || !codeLines) {
+      return [];
+    }
 
-  // Update refs whenever currLine or linesToHighlight changes
-  useEffect(() => {
-    console.log('Updating refs:', { currLine, linesToHighlight });
-    latestCurrLineRef.current = currLine;
-    latestLinesToHighlightRef.current = linesToHighlight;
-  }, [currLine, linesToHighlight]);
-
-  // Function to find the line number of a specific source line
-  const findLineNumber = (lines, sourceLine) => {
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim() === sourceLine.trim()) {
-        return i + 1; // Line numbers start at 1
+    const highlightSet = new Set();
+    processedData.results.forEach((result) => {
+      const lineNum = findLineNumber(codeLines, result.source_line);
+      if (lineNum !== -1) {
+        highlightSet.add(lineNum);
       }
-    }
-    return -1; // Not found
-  };
+    });
 
-  // Determine which lines to highlight based on currBlock
-  useEffect(() => {
-    console.log('Determining lines to highlight. currBlock:', currBlock);
-    console.log('codeLines:', codeLines);
-
-    if (
-      !currBlock ||
-      !currBlock.processedData ||
-      !currBlock.processedData.results ||
-      !codeLines
-    ) {
-      console.log('Missing required data, setting linesToHighlight to empty array');
-      setLinesToHighlight([]);
-      return;
-    }
-
-    // Build the linesToHighlight array preserving control flow order
-    const highlightLines = currBlock.processedData.results
+    // Convert Set to Array and maintain order based on results
+    const highlightLines = processedData.results
       .map((result) => {
         const lineNum = findLineNumber(codeLines, result.source_line);
-        console.log('Mapping result to line number:', { result, lineNum });
         return lineNum;
       })
-      .filter((lineNum) => lineNum !== -1);
+      .filter((lineNum) => lineNum !== -1 && highlightSet.has(lineNum));
 
-    console.log('Setting linesToHighlight:', highlightLines);
-    setLinesToHighlight(highlightLines);
-  }, [currBlock, codeLines]);
+    return highlightLines;
+  }, [processedData, codeLines]);
 
-  // Automatically set currLine to the first highlighted line or default to first line
+  // Initialize or reset currentHighlightIndex when linesToHighlight changes
   useEffect(() => {
-    console.log('Setting initial currLine. linesToHighlight:', linesToHighlight);
-    console.log('codeLines length:', codeLines.length);
     if (linesToHighlight.length > 0) {
-      console.log('Setting currLine to first highlighted line:', linesToHighlight[0]);
+      setCurrentHighlightIndex(0);
       setCurrLine(linesToHighlight[0]);
     } else if (codeLines.length > 0) {
-      console.log('Setting currLine to 1 (default)');
+      setCurrentHighlightIndex(0);
       setCurrLine(1); // Default to first line if no highlights
     }
-  }, [linesToHighlight, codeLines, setCurrLine]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linesToHighlight]);
 
   // Scroll to the current line when currLine changes
   useEffect(() => {
-    console.log('Scrolling to currLine:', currLine);
     if (currLine && codeContainerRef.current) {
       const lineElement = document.getElementById(`code-line-${currLine}`);
       if (lineElement) {
-        console.log('Scrolling to line element:', lineElement);
         lineElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      } else {
-        console.log('Line element not found for currLine:', currLine);
       }
     }
   }, [currLine]);
 
-  // Handle keyboard navigation using left and right arrow keys
+  // Handle keyboard navigation using up and down arrow keys
   useEffect(() => {
     const handleKeyDown = (event) => {
-      console.log('Key pressed:', event.key);
-      if (event.key === 'ArrowRight') {
-        event.preventDefault(); // Prevent default scrolling
+
+      if (event.key === '.') {
+        event.preventDefault();
         handleNextLine();
-      } else if (event.key === 'ArrowLeft') {
-        event.preventDefault(); // Prevent default scrolling
+      } else if (event.key === ',') {
+        event.preventDefault();
         handlePrevLine();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
 
-    // Clean up the event listener on component unmount
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentHighlightIndex, linesToHighlight]);
 
-  // Navigate to the previous highlighted line
   const handlePrevLine = () => {
-    const { current: currentLine } = latestCurrLineRef;
-    const { current: currentHighlights } = latestLinesToHighlightRef;
-
-    console.log('Handling previous line. Current line:', currentLine);
-    console.log('Current highlights:', currentHighlights);
-
-    if (currentLine) {
-      const currentIndex = currentHighlights.indexOf(currentLine);
-      console.log('Current index in highlights:', currentIndex);
-      if (currentIndex > 0) {
-        const newLine = currentHighlights[currentIndex - 1];
-        console.log('Setting new line:', newLine);
-        setCurrLine(newLine);
-      } else {
-        console.log('Already at the first highlighted line');
-      }
-    } else {
-      console.log('No current line set');
+    if (currentHighlightIndex > 0) {
+      const newIndex = currentHighlightIndex - 1;
+      setCurrentHighlightIndex(newIndex);
+      setCurrLine(linesToHighlight[newIndex]);
     }
   };
 
-  // Navigate to the next highlighted line
   const handleNextLine = () => {
-    const { current: currentLine } = latestCurrLineRef;
-    const { current: currentHighlights } = latestLinesToHighlightRef;
-
-    console.log('Handling next line. Current line:', currentLine);
-    console.log('Current highlights:', currentHighlights);
-
-    if (currentLine) {
-      const currentIndex = currentHighlights.indexOf(currentLine);
-      console.log('Current index in highlights:', currentIndex);
-      if (currentIndex < currentHighlights.length - 1) {
-        const newLine = currentHighlights[currentIndex + 1];
-        console.log('Setting new line:', newLine);
-        setCurrLine(newLine);
-      } else {
-        console.log('Already at the last highlighted line');
-      }
-    } else {
-      console.log('No current line set');
+    if (currentHighlightIndex < linesToHighlight.length - 1) {
+      const newIndex = currentHighlightIndex + 1;
+      setCurrentHighlightIndex(newIndex);
+      setCurrLine(linesToHighlight[newIndex]);
     }
   };
 
-  // Info Dialog state
-  const [isInfoPopupOpen, setIsInfoPopupOpen] = useState(false);
+  // Function to find the line number of a specific source line
+  function findLineNumber(lines, sourceLine) {
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === sourceLine.trim()) {
+        return i + 1; // Line numbers start at 1
+      }
+    }
+    return -1; // Not found
+  }
 
   // If there's an error fetching code, display it
   if (errorCode) {
-    console.log('Rendering error state');
     return (
       <Box
         sx={{
@@ -692,7 +1118,6 @@ const CodeViewerComponent = ({
 
   // If the code is still loading, display a loading message
   if (loadingCode) {
-    console.log('Rendering loading state');
     return (
       <Box
         sx={{
@@ -712,7 +1137,6 @@ const CodeViewerComponent = ({
 
   // If no block is selected, display a message
   if (!currBlock) {
-    console.log('Rendering no block selected state');
     return (
       <Typography
         variant="h6"
@@ -724,10 +1148,6 @@ const CodeViewerComponent = ({
       </Typography>
     );
   }
-
-  console.log('Rendering main component');
-  console.log('linesToHighlight:', linesToHighlight);
-  console.log('currLine:', currLine);
 
   return (
     <Box
@@ -770,7 +1190,6 @@ const CodeViewerComponent = ({
       >
         {codeLines.map((line, index) => {
           const lineNumber = index + 1;
-          const isHighlighted = linesToHighlight.includes(lineNumber);
           const isCurrent = currLine === lineNumber;
 
           return (
@@ -779,9 +1198,7 @@ const CodeViewerComponent = ({
               id={`code-line-${lineNumber}`}
               style={{
                 backgroundColor: isCurrent
-                  ? 'rgba(255, 255, 0, 0.7)'
-                  : isHighlighted
-                  ? 'rgba(255, 255, 0, 0.3)'
+                  ? 'rgba(255, 255, 0, 0.7)' // Highlighted color
                   : 'transparent',
                 padding: '0 5px',
                 cursor: 'default',
@@ -808,16 +1225,14 @@ const CodeViewerComponent = ({
         >
           <Button
             onClick={handlePrevLine}
-            disabled={currLine === linesToHighlight[0]}
+            disabled={currentHighlightIndex === 0}
             variant="contained"
           >
             Previous
           </Button>
           <Button
             onClick={handleNextLine}
-            disabled={
-              currLine === linesToHighlight[linesToHighlight.length - 1]
-            }
+            disabled={currentHighlightIndex === linesToHighlight.length - 1}
             variant="contained"
           >
             Next
@@ -858,5 +1273,16 @@ const CodeViewerComponent = ({
   );
 };
 
+CodeViewerComponent.propTypes = {
+  currBlock: PropTypes.object,
+  currLine: PropTypes.number,
+  setCurrLine: PropTypes.func.isRequired,
+  codeLines: PropTypes.array.isRequired,
+  loadingCode: PropTypes.bool.isRequired,
+  errorCode: PropTypes.string,
+  processedData: PropTypes.object,
+};
+
 export default CodeViewerComponent;
+
 
